@@ -72,10 +72,6 @@ def owner() -> str:
 
 
 IDFILE = KEYFILE.with_suffix(".id")
-AGENT_CARD = {"type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1", "name": "ANZEN event agent",
-              "description": "Finds creator events and reserves places for its owner within a budget the owner "
-                             "signed. Cannot check in: presence is the owner's.",
-              "services": [{"name": "anzen", "endpoint": BASE}]}
 
 
 def agent_id() -> int | None:
@@ -97,11 +93,12 @@ def register_identity(a) -> int | None:
                {"name": "agentId", "type": "uint256", "indexed": True}, {"name": "agentURI", "type": "string", "indexed": False},
                {"name": "owner", "type": "address", "indexed": True}]}]
     reg = w3.eth.contract(address=info["identityRegistry"], abi=abi)
-    import base64
-    uri = "data:application/json;base64," + base64.b64encode(json.dumps(AGENT_CARD).encode()).decode()
+    uri = f"{BASE}/agents/{a.address}/card"  # short URI: registry storage is paid by the agent
     call = reg.functions.register(uri)
+    fee = w3.eth.gas_price  # Monad charges gas limit x max fee up front, so keep both tight
     tx = call.build_transaction({"from": a.address, "nonce": w3.eth.get_transaction_count(a.address),
-                                 "gas": int(call.estimate_gas({"from": a.address}) * 1.3)})
+                                 "gas": int(call.estimate_gas({"from": a.address}) * 1.15),
+                                 "maxFeePerGas": fee, "maxPriorityFeePerGas": min(fee, 2 * 10**9)})
     receipt = w3.eth.wait_for_transaction_receipt(w3.eth.send_raw_transaction(a.sign_transaction(tx).raw_transaction))
     from web3.logs import DISCARD
     return reg.events.Registered().process_receipt(receipt, errors=DISCARD)[0]["args"]["agentId"]

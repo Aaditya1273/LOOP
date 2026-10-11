@@ -134,6 +134,10 @@ def create_app(svc: Anzen | None = None) -> FastAPI:
     def agent(agent: str, agentId: int | None = None):
         return svc.agent_info(agent, agentId)
 
+    @app.get("/agents/{agent}/card")
+    def agent_card(agent: str, request: Request):
+        return svc.agent_card(agent, str(request.base_url).rstrip("/"))
+
     @app.post("/agents/{agent}/gas")
     def agent_gas(agent: str):
         return svc.agent_gas(agent)

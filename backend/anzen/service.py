@@ -22,7 +22,7 @@ log = logging.getLogger("anzen")
 
 CHALLENGE_TTL = 45  # seconds a venue code stays valid
 MAX_SIGNATURE_WINDOW = 15 * 60
-AGENT_GAS_WEI = 30 * 10**15  # 0.03 MON: enough for one ERC-8004 registration on Monad testnet
+AGENT_GAS_WEI = 50 * 10**15  # 0.05 MON: one ERC-8004 registration on Monad testnet (gas limit x fee is charged)
 NO_SHOW = {0: "organizer", 1: "split"}
 STATUS = {0: "none", 1: "committed", 2: "checked_in", 3: "settled"}
 
@@ -247,6 +247,15 @@ class Anzen:
                 "chainId": self.chain.chain_id, "treasury": self.chain.treasury.address, "now": self.chain.now(),
                 "rpc": self.public_rpc, "identityRegistry": ident, "reputationRegistry": rep,
                 "reputation": self.chain.show_up(agent_id) if agent_id is not None else None}
+
+    def agent_card(self, agent: str, base_url: str) -> dict:
+        """The ERC-8004 registration file an ANZEN agent points its identity at."""
+        return {"type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1", "name": "ANZEN event agent",
+                "description": "Finds creator events and reserves places for its owner within a budget the owner "
+                               "signed on their phone. It cannot check in: presence is the owner's.",
+                "services": [{"name": "anzen", "endpoint": base_url}],
+                "registrations": [{"agentRegistry": f"eip155:{self.chain.chain_id}:{self.chain.registries[0]}"}],
+                "supportedTrust": ["reputation"], "wallet": Web3.to_checksum_address(agent)}
 
     def agent_gas(self, agent: str) -> dict:
         """Testnet only: a little MON so a new agent can register its own ERC-8004 identity. Once per agent."""
