@@ -66,6 +66,11 @@ ERC-8004 reputation registry.
 | bob's outcome applied (no-show) | [0xd95f118c…](https://testnet.monadexplorer.com/tx/0xd95f118ca6c50c602105085fc49fb39b51a56b960613ce1b12f4e605bc0c9297) |
 | treasury writes the agent's show-up result (0%) to the ERC-8004 reputation registry | same transaction as Bob's outcome ↑ (`getSummary(2183, [treasury])` → count 1, 0%) |
 
+Repeated on Oct 11 after the show-up board shipped: agent [#2184](https://anzen-shonko.vercel.app/#/agents) booked,
+its human didn't come, and the treasury wrote 0 in the same transaction as the outcome
+([0x6185b4f4…](https://testnet.monadexplorer.com/tx/0x6185b4f4129570243e9e4b87029e720098f00ecc60d80b68038f5eb7f1b5119c)).
+It now appears on the public board.
+
 Contracts: treasury [`0xb8775046…5d8f`](https://testnet.monadexplorer.com/address/0xb87750460d648B0D7C953B42aE6FcDB9245F5d8f) ·
 test dollar [`0x5799a…Dff73`](https://testnet.monadexplorer.com/address/0x5799ab1E835225a824C550Fe3797Ce7a846Dff73) ·
 ERC-8004 identity [`0x8004A818…BD9e`](https://testnet.monadexplorer.com/address/0x8004A818BFB912233c491871b3d84c89A494BD9e) /
