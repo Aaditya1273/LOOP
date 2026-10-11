@@ -134,20 +134,29 @@ class Chain:
                 raise AnzenError(reason, name) from None
             except ContractLogicError as e:
                 raise AnzenError(Reason.REVERTED, str(e.message or "")) from None
-            tx = call.build_transaction({
-                "from": self.relayer.address, "gas": int(gas * 1.25) + 20_000,
-                "nonce": self._rpc(lambda: self.w3.eth.get_transaction_count(self.relayer.address, "pending")),
-            })
-            signed = self.relayer.sign_transaction(tx)
-            return "0x" + self._rpc(lambda: self.w3.eth.send_raw_transaction(signed.raw_transaction)).hex().removeprefix("0x")
+            return self._broadcast(lambda nonce: call.build_transaction({
+                "from": self.relayer.address, "gas": int(gas * 1.25) + 20_000, "nonce": nonce}))
+
+    def _broadcast(self, build) -> str:
+        """Signs and sends with the relayer's next nonce. Serverless instances share the relayer, so two can pick the
+        same nonce; the loser re-reads the pending nonce and retries instead of failing the user's action."""
+        for attempt in range(4):
+            nonce = self._rpc(lambda: self.w3.eth.get_transaction_count(self.relayer.address, "pending"))
+            signed = self.relayer.sign_transaction(build(nonce))
+            try:
+                return "0x" + self._rpc(lambda: self.w3.eth.send_raw_transaction(signed.raw_transaction)).hex().removeprefix("0x")
+            except Exception as e:
+                msg = str(e).lower()
+                if attempt < 3 and any(k in msg for k in ("nonce", "already known", "underpriced", "replacement")):
+                    time.sleep(0.4 * (attempt + 1))
+                    continue
+                raise
 
     def send_value(self, to: str, wei: int) -> str:
         with self.lock:
-            tx = {"to": to, "value": wei, "gas": 21_000, "chainId": self.chain_id,
-                  "nonce": self._rpc(lambda: self.w3.eth.get_transaction_count(self.relayer.address, "pending")),
-                  "maxFeePerGas": self._rpc(lambda: self.w3.eth.gas_price) * 2, "maxPriorityFeePerGas": 10**9}
-            return "0x" + self._rpc(lambda: self.w3.eth.send_raw_transaction(
-                self.relayer.sign_transaction(tx).raw_transaction)).hex().removeprefix("0x")
+            fee = self._rpc(lambda: self.w3.eth.gas_price)
+            return self._broadcast(lambda nonce: {"to": to, "value": wei, "gas": 21_000, "chainId": self.chain_id,
+                                                  "nonce": nonce, "maxFeePerGas": fee * 2, "maxPriorityFeePerGas": 10**9})
 
     def wait(self, tx: str, timeout: float = 30) -> dict:
         return self._rpc(lambda: self.w3.eth.wait_for_transaction_receipt(tx, timeout=timeout, poll_latency=0.25))
