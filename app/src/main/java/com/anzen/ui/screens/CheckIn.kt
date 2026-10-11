@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -256,8 +257,10 @@ fun CheckInScreen(id: Long, codeArg: String?, vm: AppViewModel, back: () -> Unit
 private fun CheckedIn(title: String, tx: String, onDone: () -> Unit) {
     val c = Anzen.colors
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        com.anzen.ui.components.StatusGlyph(Tone.Verified, c.statusVerified, 64.dp)
-        Gap(16)
+        com.anzen.ui.components.Mascot(com.anzen.ui.components.Panda.Success, Modifier.height(160.dp))
+        Gap(12)
+        com.anzen.ui.components.StatusPill("Verified onchain", Tone.Verified)
+        Gap(10)
         Text("You're checked in", style = AnzenType.title, color = c.textPrimary)
         Gap(6)
         Text("The treasury recorded your check-in for $title. Your outcome is applied after check-in closes.",
@@ -336,7 +339,7 @@ fun DeskScreen(id: Long, vm: AppViewModel, back: () -> Unit) {
                     Gap(12)
                     StatusPill("New code every 35 s · each valid 45 s", Tone.Info)
                     Gap(12)
-                    InfoNote("Attendees scan this with Shonko or their camera app. A code works for anyone who can see it while " +
+                    InfoNote("Attendees scan this with ANZEN or their camera app. A code works for anyone who can see it while " +
                         "it's valid, so keep it at the desk.")
                     Gap(8)
                     QuietButton("Copy code link") { copyText(ctx, "Venue code", cc.uri); toast("Code link copied · valid 45 s") }

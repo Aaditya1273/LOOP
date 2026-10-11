@@ -1,4 +1,4 @@
-# Building, running and testing ANZEN · Shonko
+# Building, running and testing ANZEN
 
 The pitch and a two-minute walkthrough are in [README.md](README.md); the full protocol vision is in
 [docs/SPEC.md](docs/SPEC.md). This file is for running and checking the code.
@@ -35,8 +35,8 @@ The pitch and a two-minute walkthrough are in [README.md](README.md); the full p
 contracts/   AnzenTreasury.sol, TestDollar.sol, Deploy.s.sol; tests incl. Erc8004Fork.t.sol (real registries)
 backend/     ANZEN service (FastAPI): relayer, venue-code issuer, policy store (SQLite or Postgres), proofs,
              agent CLI (anzen/agent.py), MCP server (anzen/mcp_server.py), seeding, smoke run; serves web/
-web/         Shonko in the browser: passkeys (anzen.js), app (app.js); vectors.test.mjs, passkey.e2e.mjs
-app/         Shonko for Android (Kotlin, Compose, Hilt, CameraX, ZXing)
+web/         ANZEN in the browser: passkeys (anzen.js), app (app.js); vectors.test.mjs, passkey.e2e.mjs
+app/         ANZEN for Android (Kotlin, Compose, Hilt, CameraX, ZXing)
 skills/      OpenClaw skill
 scripts/     dev_stack.sh, warp.sh, device_e2e.py, agent_demo.sh, deploy_testnet.sh
 index.py     Vercel entry point (service + web app)
@@ -82,7 +82,7 @@ python3 scripts/device_e2e.py emulator-5554 all               # 11 Android journ
 
 ```bash
 skills/anzen/scripts/anzen-agent init        # agent key + ERC-8004 identity; prints anzen://delegate?agent=…&id=…
-# open the link in Shonko (Android) or https://anzen-shonko.vercel.app/#/delegate?agent=…&id=…&cap=20&days=7 (web)
+# open the link in the ANZEN app (Android) or https://anzen-shonko.vercel.app/#/delegate?agent=…&id=…&cap=20&days=7 (web)
 ANZEN_OWNER=0x<account key> skills/anzen/scripts/anzen-agent events
 ANZEN_OWNER=0x<account key> skills/anzen/scripts/anzen-agent reserve <id>
 skills/anzen/scripts/anzen-agent reputation  # show-up rate written by the treasury

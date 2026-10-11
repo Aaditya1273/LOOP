@@ -46,7 +46,7 @@ export async function keyIdOf(qx, qy) { return hex(await sha256(concat(unhex(qx)
  *  the account; nothing secret ever leaves the authenticator, and nothing secret is stored here. */
 export async function createAccount(name) {
   const cred = await navigator.credentials.create({ publicKey: {
-    rp: { name: "Shonko · ANZEN" },
+    rp: { name: "ANZEN" },
     user: { id: crypto.getRandomValues(new Uint8Array(16)), name, displayName: name },
     challenge: crypto.getRandomValues(new Uint8Array(32)),
     pubKeyCredParams: [{ type: "public-key", alg: -7 }], // ES256 = P-256

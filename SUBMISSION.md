@@ -1,4 +1,4 @@
-# ANZEN · Shonko
+# ANZEN
 
 **Your agent can book it. Only you can show up.**
 

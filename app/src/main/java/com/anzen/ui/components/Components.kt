@@ -13,12 +13,14 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -38,6 +40,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -70,17 +73,22 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import com.anzen.R
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.anzen.core.ErrorCopy
 import com.anzen.core.Format
 import com.google.zxing.BarcodeFormat
@@ -139,15 +147,15 @@ fun Panel(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null, padding:
           content: @Composable ColumnScope.() -> Unit) {
     val c = Anzen.colors
     Column(
-        modifier.fillMaxWidth().clip(Radius.medium).background(c.backgroundElevated)
-            .border(1.dp, c.borderSubtle, Radius.medium)
+        modifier.fillMaxWidth().clip(Radius.card).background(c.backgroundElevated)
+            .border(1.dp, c.borderSubtle, Radius.card)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(padding),
         content = content,
     )
 }
 
-/** Ink (light) / graphite (dark) surface for the things that matter most: amounts, passports, outcomes. */
+/** Deep pine surface for the things that matter most: amounts, passports, outcomes. */
 @Composable
 fun SealedPanel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) = Column(
     modifier.fillMaxWidth().clip(Radius.large).background(Anzen.colors.surfaceSealed).padding(Spacing.xl),
@@ -175,7 +183,7 @@ fun PrimaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolean 
         colors = ButtonDefaults.buttonColors(
             containerColor = if (accent) c.accent else c.actionPrimary,
             contentColor = if (accent) c.onAccent else c.onActionPrimary,
-            disabledContainerColor = c.surfaceSecondary, disabledContentColor = c.textTertiary),
+            disabledContainerColor = c.disabled, disabledContentColor = c.textTertiary),
     ) {
         if (loading) {
             CircularProgressIndicator(Modifier.size(18.dp), color = c.textSecondary, strokeWidth = 2.dp)
@@ -267,12 +275,12 @@ private val RoundedSmall = androidx.compose.foundation.shape.RoundedCornerShape(
 fun ChoiceRow(title: String, body: String, selected: Boolean, onClick: () -> Unit) {
     val c = Anzen.colors
     Row(Modifier.fillMaxWidth().clip(Radius.medium)
-        .border(if (selected) 2.dp else 1.dp, if (selected) c.textPrimary else c.borderSubtle, Radius.medium)
+        .border(if (selected) 2.dp else 1.dp, if (selected) c.actionPrimary else c.borderSubtle, Radius.medium)
         .background(c.backgroundElevated).selectable(selected, role = Role.RadioButton, onClick = onClick)
         .padding(Spacing.l), verticalAlignment = Alignment.Top) {
-        Box(Modifier.padding(top = 2.dp).size(20.dp).border(2.dp, if (selected) c.textPrimary else c.borderStrong, CircleShape),
+        Box(Modifier.padding(top = 2.dp).size(20.dp).border(2.dp, if (selected) c.actionPrimary else c.borderStrong, CircleShape),
             contentAlignment = Alignment.Center) {
-            if (selected) Box(Modifier.size(10.dp).background(c.textPrimary, CircleShape))
+            if (selected) Box(Modifier.size(10.dp).background(c.actionPrimary, CircleShape))
         }
         Spacer(Modifier.width(Spacing.m))
         Column {
@@ -335,9 +343,9 @@ fun StatusGlyph(tone: Tone, color: Color, size: Dp) = Canvas(Modifier.size(size)
 
 /** Always visible on money screens off mainnet: which network, and that the asset has no value. */
 @Composable
-fun NetworkBadge(network: String?, modifier: Modifier = Modifier) {
+fun NetworkBadge(network: String?, modifier: Modifier = Modifier, onSealed: Boolean = false) {
     if (network == null) return
-    StatusPill("$network · test dollars", Tone.Info, modifier)
+    StatusPill("$network · test dollars", if (onSealed) Tone.Accent else Tone.Info, modifier)
 }
 
 @Composable
@@ -428,8 +436,8 @@ fun copyText(ctx: Context, label: String, text: String) =
 fun EmptyState(title: String, body: String, modifier: Modifier = Modifier, action: String? = null, onAction: () -> Unit = {}) =
     Column(modifier.fillMaxWidth().padding(vertical = Spacing.xxl, horizontal = Spacing.l),
         horizontalAlignment = Alignment.CenterHorizontally) {
-        BrandMark(Modifier.size(44.dp), muted = true)
-        Gap(16)
+        Mascot(Panda.Curious, Modifier.height(112.dp))
+        Gap(12)
         Text(title, style = AnzenType.headline, color = Anzen.colors.textPrimary, textAlign = TextAlign.Center)
         Gap(6)
         Text(body, style = AnzenType.callout, color = Anzen.colors.textSecondary, textAlign = TextAlign.Center)
@@ -464,32 +472,32 @@ fun FadeIn(visible: Boolean, content: @Composable () -> Unit) =
 
 // ------------------------------------------------------------------ brand
 
-/**
- * The ANZEN mark: a ring left open at the upper right, closed by a lime seal: a commitment, sealed.
- * Same geometry as res/drawable/ic_launcher_foreground.xml.
- */
+/** The ANZEN app icon (the panda in its cap), as a small rounded tile for headers and passports. */
 @Composable
-fun BrandMark(modifier: Modifier = Modifier, muted: Boolean = false, onSealed: Boolean = false) {
-    val c = Anzen.colors
-    val ring = when {
-        onSealed -> c.onSealed
-        muted -> c.textTertiary
-        else -> c.textPrimary
-    }
-    val seal = if (muted) c.textTertiary else c.accent
-    Canvas(modifier.semantics { contentDescription = "ANZEN" }) { drawMark(ring, seal) }
+fun BrandMark(modifier: Modifier = Modifier) = Image(
+    painterResource(R.drawable.ic_launcher_art), contentDescription = "ANZEN",
+    modifier.clip(RoundedCornerShape(28)).border(1.dp, Anzen.colors.borderSubtle, RoundedCornerShape(28)),
+)
+
+/** "ANZEN" set in the brand pine, tracked wide like the logotype. */
+@Composable
+fun Wordmark(modifier: Modifier = Modifier) =
+    Text("ANZEN", modifier, style = AnzenType.headline.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.6.sp),
+        color = Anzen.colors.brand)
+
+/** The ANZEN panda. Used sparingly: onboarding, empty states and real celebrations, never on errors. */
+enum class Panda(val res: Int) {
+    Happy(R.drawable.panda_happy), Excited(R.drawable.panda_excited), Focused(R.drawable.panda_focused),
+    Confident(R.drawable.panda_confident), Curious(R.drawable.panda_curious), Success(R.drawable.panda_success),
 }
 
-fun DrawScope.drawMark(ring: Color, seal: Color) {
-    val w = size.minDimension
-    val stroke = w * 0.13f
-    val inset = stroke / 2 + w * 0.06f
-    // Ring from -10° clockwise through 290°, leaving a gap centred at -45° (upper right) for the seal.
-    drawArc(ring, startAngle = -10f, sweepAngle = 290f, useCenter = false, topLeft = Offset(inset, inset),
-        size = Size(w - 2 * inset, w - 2 * inset), style = Stroke(stroke, cap = StrokeCap.Round))
-    val r = (w - 2 * inset) / 2
-    val a = Math.toRadians(-45.0)
-    drawCircle(seal, w * 0.15f, Offset(w / 2 + r * kotlin.math.cos(a).toFloat(), w / 2 + r * kotlin.math.sin(a).toFloat()))
+/** Decorative by default (the text next to it says what happened); pass [description] when it carries meaning. */
+@Composable
+fun Mascot(panda: Panda, modifier: Modifier = Modifier, description: String? = null) {
+    val art = painterResource(panda.res)
+    // Size from the given height and the art's own proportions (the bitmap alone would keep its small intrinsic width).
+    Image(art, contentDescription = description, modifier.aspectRatio(art.intrinsicSize.width / art.intrinsicSize.height),
+        contentScale = ContentScale.Fit)
 }
 
 /** A QR code drawn from bits (no bitmap). Quiet zone included. */

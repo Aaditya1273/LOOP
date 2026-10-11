@@ -118,7 +118,7 @@ fun CreateScreen(vm: AppViewModel, onClose: () -> Unit, onCreated: (Long) -> Uni
         // Progress: six segments, the current one filled. Also announced as text.
         Row(Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             repeat(DraftRules.STEPS) { i ->
-                Box(Modifier.weight(1f).height(4.dp).clip(Radius.small).background(if (i <= d.step) c.textPrimary else c.surfaceSecondary))
+                Box(Modifier.weight(1f).height(4.dp).clip(Radius.small).background(if (i <= d.step) c.actionPrimary else c.surfaceSecondary))
             }
         }
         Text("Step ${d.step + 1} of ${DraftRules.STEPS} · ${STEP_TITLES[d.step]}", style = AnzenType.caption, color = c.textSecondary,
@@ -172,7 +172,7 @@ private fun Basics(d: EventDraft, update: (EventDraft) -> Unit) {
         repeat(ARTWORK_COUNT) { i ->
             val on = d.artwork == i
             EventArtwork(i, 7, Modifier.weight(1f).height(56.dp).clip(Radius.small)
-                .border(if (on) 3.dp else 0.dp, if (on) Anzen.colors.textPrimary else Anzen.colors.backgroundPrimary, Radius.small)
+                .border(if (on) 3.dp else 0.dp, if (on) Anzen.colors.actionPrimary else Anzen.colors.backgroundPrimary, Radius.small)
                 .selectable(on, role = Role.RadioButton) { update(d.copy(artwork = i)) })
         }
     }

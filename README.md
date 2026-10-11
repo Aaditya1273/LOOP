@@ -1,4 +1,6 @@
-# ANZEN · Shonko
+<p align="center"><img src="web/brand/panda-happy.webp" width="150" alt="The ANZEN panda"></p>
+
+# ANZEN
 
 **Your agent can book it. Only you can show up.**
 
@@ -103,8 +105,8 @@ and anyone can repeat it: `ANZEN_URL=https://anzen-shonko.vercel.app uv run pyth
 ```
 contracts/  AnzenTreasury.sol (+ tests, fork test vs real ERC-8004), TestDollar.sol
 backend/    ANZEN service: relayer, venue-code issuer, policy store, proofs, agent CLI, MCP server
-web/        Shonko in the browser (passkeys), served by the service
-app/        Shonko for Android (Kotlin/Compose, Keystore keys, CameraX QR)
+web/        ANZEN in the browser (passkeys), served by the service
+app/        ANZEN for Android (Kotlin/Compose, Keystore keys, CameraX QR)
 skills/     OpenClaw skill
 docs/       SPEC.md: the full protocol vision
 ```

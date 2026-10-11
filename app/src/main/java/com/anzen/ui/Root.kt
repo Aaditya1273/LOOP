@@ -47,6 +47,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -268,7 +269,7 @@ private fun TabBar(selected: Tab, onSelect: (Tab) -> Unit, onCreate: () -> Unit,
     val c = Anzen.colors
     Row(
         modifier.navigationBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth().height(64.dp)
-            .shadow(12.dp, RoundedCornerShape(32.dp), ambientColor = c.textPrimary.copy(alpha = 0.2f), spotColor = c.textPrimary.copy(alpha = 0.2f))
+            .shadow(8.dp, RoundedCornerShape(32.dp), ambientColor = c.textPrimary.copy(alpha = 0.12f), spotColor = c.textPrimary.copy(alpha = 0.12f))
             .clip(RoundedCornerShape(32.dp)).background(c.chrome).border(1.dp, c.borderSubtle, RoundedCornerShape(32.dp))
             .padding(horizontal = 6.dp).selectableGroup(),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly,
@@ -286,9 +287,12 @@ private fun TabBar(selected: Tab, onSelect: (Tab) -> Unit, onCreate: () -> Unit,
                     .selectable(on, role = Role.Tab) { onSelect(t) },
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
             ) {
-                Icon(t.icon, null, tint = if (on) c.textPrimary else c.textTertiary, modifier = Modifier.size(22.dp))
+                Box(Modifier.size(width = 44.dp, height = 26.dp).clip(CircleShape).background(if (on) c.surfaceSecondary else Color.Transparent),
+                    contentAlignment = Alignment.Center) {
+                    Icon(t.icon, null, tint = if (on) c.brand else c.textTertiary, modifier = Modifier.size(22.dp))
+                }
                 Text(t.label, style = AnzenType.caption.copy(fontSize = AnzenType.caption.fontSize * 0.85f),
-                    color = if (on) c.textPrimary else c.textTertiary)
+                    color = if (on) c.brand else c.textTertiary)
             }
         }
     }

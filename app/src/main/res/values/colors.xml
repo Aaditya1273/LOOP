@@ -1,8 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ink">#FF111318</color>
-    <color name="ivory">#FFF6F3EC</color>
-    <color name="lime">#FFD3F36B</color>
-    <color name="window">@color/ivory</color>
-    <color name="mark_ring">@color/ink</color>
+    <color name="canvas">#FFF7F8F5</color>
+    <color name="window">@color/canvas</color>
 </resources>

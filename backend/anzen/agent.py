@@ -9,7 +9,7 @@ for its owner inside the budget the owner signed on their phone.
 
 Environment:
   ANZEN_URL           service URL (default: the live service, https://anzen-shonko.vercel.app)
-  ANZEN_OWNER         the owner's account key id (0x..., shown in Shonko > Profile)
+  ANZEN_OWNER         the owner's account key id (0x..., shown in ANZEN > Account)
   ANZEN_AGENT_KEYFILE agent key file (default ~/.anzen/agent.key)
 
 The agent key can only spend inside the owner's onchain cap, until the owner's expiry. It cannot check in,

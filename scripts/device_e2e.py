@@ -134,8 +134,10 @@ def fresh_install() -> None:
 def onboarding() -> None:
     step("1. new user onboarding")
     adb("shell", "am", "start", "-n", f"{PKG}/com.anzen.MainActivity")
-    wait_for("Commit to show.")
+    wait_for("Find events worth showing up for.")
     shot("01_onboarding")
+    tap("Continue")
+    wait_for("Commit to show.")
     tap("Continue")
     wait_for("Prove your presence.")
     tap("Continue")

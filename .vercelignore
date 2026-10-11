@@ -21,3 +21,4 @@ backend/.venv
 backend/tests
 **/*.db*
 Dockerfile
+ANZEN Panda Mascot Showcase*

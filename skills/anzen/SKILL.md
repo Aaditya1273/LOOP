@@ -41,7 +41,7 @@ Run `{baseDir}/scripts/anzen-agent <command>` with the shell tool. It prints one
 ## How to work
 
 1. If `budget` says no active budget, run `init` and send the user the `approvalLink` (web; `appLink` opens the Android app). Tell them: "Open this on
-   your phone and approve a budget in Shonko. I can only spend inside it." Stop until they confirm.
+   your phone and approve a budget in ANZEN. I can only spend inside it." Stop until they confirm.
 2. To find events, run `events`, filter by what the user asked for (topic, date, city, price), and skip any with
    `alreadyReserved: true` or `seatsLeft: 0`.
 3. Before reserving, tell the user the event, when and where, the commitment amount, and that they get it back
@@ -50,7 +50,7 @@ Run `{baseDir}/scripts/anzen-agent <command>` with the shell tool. It prints one
 4. Never reserve more than the remaining budget allows; if `reserve` returns `BudgetExceeded` or `NotDelegated`,
    explain and ask them to raise or renew the budget on their phone.
 5. After a reservation, confirm with the event title, amount and check-in window, and remind them: "You'll need to
-   scan the code at the venue with Shonko to get your commitment back."
+   scan the code at the venue with ANZEN to get your commitment back."
 6. Your reputation is public and earned only by outcomes: every reservation you make that the owner doesn't show up
    for lowers your show-up rate. Prefer events the owner is likely to attend (their city, their free time); never
    book speculatively to fill the budget.

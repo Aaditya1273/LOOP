@@ -13,6 +13,8 @@ const step = (s) => console.log("✓", s);
 
 const browser = await chromium.launch();
 const page = await (await browser.newContext({ viewport: { width: 430, height: 900 } })).newPage();
+page.on("pageerror", (e) => console.error("page error:", e.message));
+page.on("console", (m) => ["error", "warning"].includes(m.type()) && console.error(`console ${m.type()}:`, m.text()));
 const cdp = await page.context().newCDPSession(page);
 await cdp.send("WebAuthn.enable");
 await cdp.send("WebAuthn.addVirtualAuthenticator", { options: {
@@ -22,7 +24,7 @@ const until = async (re, sel = "body", timeout = 120000) => {
   try {
     await page.waitForFunction(([r, s]) => new RegExp(r).test(document.querySelector(s)?.innerText || ""), [re.source, sel], { timeout });
   } catch (e) {
-    console.error(`waiting for ${re} — screen was:\n${(await page.locator("main").innerText()).slice(0, 800)}`);
+    console.error(`waiting for ${re} in ${sel} — it had: ${JSON.stringify(await page.evaluate((s) => document.querySelector(s)?.outerHTML?.slice(0, 600), sel))}\nscreen:\n${(await page.locator("main").innerText()).slice(0, 800)}`);
     throw e;
   }
 };
@@ -36,18 +38,25 @@ assert.match(await page.locator("#fbox").innerText(), /100 test dollars added/);
 step("passkey account created, test dollars verified onchain");
 
 await page.goto(`${BASE}/#/create`);
+await page.click("#next"); // step 1 refuses to continue without a title
+assert.equal(await page.locator("fieldset[data-step='0']").isVisible(), true, "validation keeps step 1 open");
 await page.fill("input[name=title]", "Browser E2E: passkey check-in");
 await page.fill("input[name=venue]", "Headless Chromium");
+await page.click("#next");
 await page.fill("input[name=dispute]", "e2e@example.com");
-await page.click("#f button");
+await page.click("#next");
+assert.match(await page.locator("#rv").innerText(), /People who don't/);
+await page.click("#next"); // Publish with passkey
 await page.waitForURL(/#\/events\/\d+/, { timeout: 120000 });
 const eventId = page.url().match(/events\/(\d+)/)[1];
-step(`event #${eventId} published (terms hash signed with the passkey)`);
+step(`event #${eventId} published from the 3-step flow (terms hash signed with the passkey)`);
 
-await page.locator("#act button", { hasText: "Commit" }).click();
+await page.locator("#act button", { hasText: "Review commitment" }).click();
+assert.match(await page.locator("#act").innerText(), /If you don't/);
+await page.locator("#act button", { hasText: "with passkey" }).click();
 await until(/Commitment recorded|Not completed/, "#box");
 assert.match(await page.locator("#box").innerText(), /Commitment recorded/);
-step("committed 5 tUSD with a WebAuthn assertion");
+step("reviewed the rules, then committed 5 tUSD with a WebAuthn assertion");
 
 warp(310);
 await page.goto(`${BASE}/#/desk/${eventId}`);

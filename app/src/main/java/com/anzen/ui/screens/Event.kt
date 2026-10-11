@@ -135,7 +135,7 @@ fun EventScreen(id: Long, vm: AppViewModel, back: () -> Unit, go: (String) -> Un
                 Gap(8)
                 Text(attendOutcomeText(ev, symbol), style = AnzenType.callout, color = Anzen.colors.onSealed)
                 Gap(12)
-                NetworkBadge(s.health?.network)
+                NetworkBadge(s.health?.network, onSealed = true)
             }
             if (!ev.policyVerified) {
                 Gap(12)

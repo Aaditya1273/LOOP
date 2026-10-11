@@ -50,12 +50,12 @@ import com.anzen.ui.theme.Spacing
 
 /** Six artwork families the organizer picks from. Generated, so no image is uploaded or hosted. */
 private val ARTWORK = listOf(
-    Palette.Ink to Palette.SignalLime,
-    Color(0xFF1F3A2E) to Color(0xFFE9E3D3),
-    Color(0xFF2B2F6B) to Color(0xFFF2B880),
-    Color(0xFFE8E2D4) to Palette.Ink,
-    Color(0xFF6B2737) to Color(0xFFF6D6C8),
-    Color(0xFF14454F) to Color(0xFFBFE3D9),
+    Palette.DeepPine to Palette.Lime,
+    Palette.Sage to Palette.Pine,
+    Palette.Pine to Color(0xFFF3E6C8),
+    Color(0xFFEFE9DC) to Palette.DeepPine,
+    Color(0xFF2C5A4A) to Color(0xFFBFE3D9),
+    Color(0xFFDCEBDD) to Color(0xFF4E6B3A),
 )
 const val ARTWORK_COUNT = 6
 
@@ -148,7 +148,7 @@ fun PassportCard(e: Event, passportId: Long, modifier: Modifier = Modifier, onCl
         EventArtwork(e.artwork, e.id, Modifier.align(Alignment.CenterEnd).fillMaxHeight().fillMaxWidth(0.28f))
         Column(Modifier.fillMaxHeight().fillMaxWidth(0.72f).padding(Spacing.xl), verticalArrangement = Arrangement.SpaceBetween) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                BrandMark(Modifier.size(22.dp), onSealed = true)
+                BrandMark(Modifier.size(24.dp))
                 Spacer(Modifier.width(Spacing.s))
                 Text("SUPPORTER PASSPORT", style = AnzenType.overline, color = c.onSealedSecondary)
             }

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -102,6 +103,8 @@ fun PassportScreen(id: Long, vm: AppViewModel, back: () -> Unit, go: (String) ->
                     "outcome is applied.", Tone.Pending)
                 return@Loaded
             }
+            com.anzen.ui.components.Mascot(com.anzen.ui.components.Panda.Excited,
+                Modifier.height(128.dp).align(Alignment.CenterHorizontally))
             Gap(8)
             PassportCard(e, me.passportId)
             Gap(16)
@@ -121,7 +124,7 @@ fun PassportScreen(id: Long, vm: AppViewModel, back: () -> Unit, go: (String) ->
                 QrCode(link, Modifier.size(200.dp), "Passport proof code")
             }
             Gap(8)
-            Text("Someone with Shonko can scan this to check the passport against the treasury. It shows this key's " +
+            Text("Anyone with ANZEN can scan this to check the passport against the treasury. It shows this key's " +
                 "participation in this event, nothing else.", style = AnzenType.caption, color = Anzen.colors.textSecondary)
             Gap(16)
             PrimaryButton("View proof") { go("proof/${e.id}/$keyId") }
@@ -129,7 +132,7 @@ fun PassportScreen(id: Long, vm: AppViewModel, back: () -> Unit, go: (String) ->
             SecondaryButton("Share") {
                 ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,
                     "Supporter passport no. ${me.passportId} for ${e.title} by ${e.creator}, recorded by the ANZEN treasury.\n" +
-                        "Verify in Shonko: $link\n(test network, no monetary value)"), "Share passport"))
+                        "Verify in ANZEN: $link\n(test network, no monetary value)"), "Share passport"))
             }
         }
     }

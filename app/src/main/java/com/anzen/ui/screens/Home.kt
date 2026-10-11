@@ -45,6 +45,7 @@ import com.anzen.ui.ActionViewModel
 import com.anzen.ui.AppViewModel
 import com.anzen.ui.components.AmountText
 import com.anzen.ui.components.BrandMark
+import com.anzen.ui.components.Wordmark
 import com.anzen.ui.components.ContentPadding
 import com.anzen.ui.components.EmptyState
 import com.anzen.ui.components.ErrorState
@@ -92,9 +93,9 @@ fun HomeScreen(vm: AppViewModel, go: (String) -> Unit, onExplore: () -> Unit) {
         LazyColumn(Modifier.fillMaxSize().statusBarsPadding(), contentPadding = ContentPadding) {
             item {
                 Row(Modifier.fillMaxWidth().padding(vertical = Spacing.m), verticalAlignment = Alignment.CenterVertically) {
-                    BrandMark(Modifier.size(26.dp))
+                    BrandMark(Modifier.size(30.dp))
                     Spacer(Modifier.width(Spacing.s))
-                    Text("Shonko", style = AnzenType.headline, color = c.textPrimary)
+                    Wordmark()
                     Spacer(Modifier.weight(1f))
                     NetworkBadge(s.health?.network)
                 }

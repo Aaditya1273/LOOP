@@ -27,22 +27,25 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** The ANZEN palette. Screens never use these directly; they use [AnzenColors] semantic tokens. */
+/** The ANZEN palette: warm white canvas, pine green identity, lime signature. Screens use [AnzenColors], not these. */
 object Palette {
-    val Ink = Color(0xFF111318)
-    val Graphite = Color(0xFF20242B)
-    val WarmIvory = Color(0xFFF6F3EC)
-    val SignalLime = Color(0xFFD3F36B)
-    val Slate = Color(0xFF777D87)
-    val VerifiedGreen = Color(0xFF237A52)
-    val PendingAmber = Color(0xFFB87918)
-    val ErrorCrimson = Color(0xFFB83E48)
-    val InfoBlue = Color(0xFF3E68C5)
+    val Canvas = Color(0xFFF7F8F5)
+    val Ink = Color(0xFF151A18)
+    val Pine = Color(0xFF176B57)
+    val DeepPine = Color(0xFF104B3D)
+    val Sage = Color(0xFFE9F5EF)
+    val Lime = Color(0xFFD7F06B)
+    val Border = Color(0xFFE5E9E4)
+    val Disabled = Color(0xFFF0F2EF)
+    val Verified = Color(0xFF217A55)
+    val Pending = Color(0xFFA86612)
+    val Failed = Color(0xFFB93842)
+    val Info = Color(0xFF315EC4)
 }
 
 /**
- * Semantic tokens. Text tokens are tuned for WCAG AA on their backgrounds (the raw Slate and Amber are too
- * light for small text on ivory, so text uses darker steps of the same hues).
+ * Semantic tokens. Text tokens are tuned for WCAG AA on their backgrounds (pending amber uses a darker step for
+ * small text on white).
  */
 @Immutable
 data class AnzenColors(
@@ -50,7 +53,7 @@ data class AnzenColors(
     val backgroundPrimary: Color,
     val backgroundElevated: Color,
     val surfaceSecondary: Color,
-    /** The signature "sealed" surface: ink in light mode, graphite in dark. Holds amounts and passports. */
+    /** The signature "sealed" surface: deep pine. Holds amounts, passports and outcomes. */
     val surfaceSealed: Color,
     val onSealed: Color,
     val onSealedSecondary: Color,
@@ -61,6 +64,9 @@ data class AnzenColors(
     val onActionPrimary: Color,
     val accent: Color,
     val onAccent: Color,
+    /** The brand's pine as text/icon colour (wordmark, selected navigation, links). */
+    val brand: Color,
+    val disabled: Color,
     val statusVerified: Color,
     val statusPending: Color,
     val statusFailed: Color,
@@ -75,52 +81,56 @@ data class AnzenColors(
 
 private val Light = AnzenColors(
     isDark = false,
-    backgroundPrimary = Palette.WarmIvory,
-    backgroundElevated = Color(0xFFFFFDF8),
-    surfaceSecondary = Color(0xFFECE8DE),
-    surfaceSealed = Palette.Ink,
-    onSealed = Palette.WarmIvory,
-    onSealedSecondary = Color(0xFFB5B9C0),
+    backgroundPrimary = Palette.Canvas,
+    backgroundElevated = Color.White,
+    surfaceSecondary = Palette.Sage,
+    surfaceSealed = Palette.DeepPine,
+    onSealed = Color.White,
+    onSealedSecondary = Color(0xFFBFD6CC),
     textPrimary = Palette.Ink,
-    textSecondary = Color(0xFF5B616B),
-    textTertiary = Color(0xFF6B717B),
-    actionPrimary = Palette.Ink,
-    onActionPrimary = Palette.WarmIvory,
-    accent = Palette.SignalLime,
-    onAccent = Palette.Ink,
-    statusVerified = Palette.VerifiedGreen,
-    statusPending = Color(0xFF8F5C0E),
-    statusFailed = Palette.ErrorCrimson,
-    statusInfo = Palette.InfoBlue,
-    borderSubtle = Palette.Ink.copy(alpha = 0.08f),
-    borderStrong = Palette.Ink.copy(alpha = 0.18f),
-    focusRing = Palette.InfoBlue,
-    chrome = Color(0xFFFFFDF8).copy(alpha = 0.94f),
+    textSecondary = Color(0xFF606962),
+    textTertiary = Color(0xFF6A736C),
+    actionPrimary = Palette.Pine,
+    onActionPrimary = Color.White,
+    accent = Palette.Lime,
+    onAccent = Palette.DeepPine,
+    brand = Palette.Pine,
+    disabled = Palette.Disabled,
+    statusVerified = Palette.Verified,
+    statusPending = Color(0xFF8C550F),
+    statusFailed = Palette.Failed,
+    statusInfo = Palette.Info,
+    borderSubtle = Palette.Border,
+    borderStrong = Color(0xFFC9D0C9),
+    focusRing = Palette.Info,
+    chrome = Color.White.copy(alpha = 0.94f),
 )
 
 private val Dark = AnzenColors(
     isDark = true,
-    backgroundPrimary = Palette.Ink,
-    backgroundElevated = Color(0xFF181B20),
-    surfaceSecondary = Color(0xFF1C1F25),
-    surfaceSealed = Palette.Graphite,
-    onSealed = Palette.WarmIvory,
-    onSealedSecondary = Color(0xFFA3A8B0),
-    textPrimary = Palette.WarmIvory,
-    textSecondary = Color(0xFFAEB3BB),
-    textTertiary = Color(0xFF8E949D),
-    actionPrimary = Palette.SignalLime,
-    onActionPrimary = Palette.Ink,
-    accent = Palette.SignalLime,
-    onAccent = Palette.Ink,
+    backgroundPrimary = Color(0xFF0E1512),
+    backgroundElevated = Color(0xFF16201B),
+    surfaceSecondary = Color(0xFF1D2A24),
+    surfaceSealed = Color(0xFF123F33),
+    onSealed = Color(0xFFF1F5F2),
+    onSealedSecondary = Color(0xFFA9C4B8),
+    textPrimary = Color(0xFFEEF2EE),
+    textSecondary = Color(0xFFA3ADA6),
+    textTertiary = Color(0xFF8D978F),
+    actionPrimary = Color(0xFF4DB892),
+    onActionPrimary = Color(0xFF07211A),
+    accent = Palette.Lime,
+    onAccent = Palette.DeepPine,
+    brand = Color(0xFF6CCBA6),
+    disabled = Color(0xFF1A231F),
     statusVerified = Color(0xFF5CC491),
     statusPending = Color(0xFFE2A54A),
     statusFailed = Color(0xFFE5737C),
     statusInfo = Color(0xFF86A5EF),
-    borderSubtle = Palette.WarmIvory.copy(alpha = 0.08f),
-    borderStrong = Palette.WarmIvory.copy(alpha = 0.18f),
+    borderSubtle = Color(0xFF24302A),
+    borderStrong = Color(0xFF34433B),
     focusRing = Color(0xFF86A5EF),
-    chrome = Color(0xFF181B20).copy(alpha = 0.94f),
+    chrome = Color(0xFF16201B).copy(alpha = 0.94f),
 )
 
 private fun AnzenColors.highContrast() = copy(
@@ -141,11 +151,12 @@ object Spacing {
     val gutter = 20.dp
 }
 
-/** Three radii only. */
+/** Radius scale: controls, buttons and inputs, cards, feature panels. */
 object Radius {
-    val small = RoundedCornerShape(10.dp)
+    val small = RoundedCornerShape(12.dp)
     val medium = RoundedCornerShape(16.dp)
-    val large = RoundedCornerShape(24.dp)
+    val card = RoundedCornerShape(20.dp)
+    val large = RoundedCornerShape(26.dp)
 }
 
 /** Durations (ms) and the one easing curve. Motion confirms an action; nothing loops for decoration. */
