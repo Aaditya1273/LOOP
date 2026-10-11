@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Anzen" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window</item>
+    </style>
+
+    <!-- Launch screen matches the first frame (ivory / ink), so the hand-off doesn't flash. -->
+    <style name="Theme.Anzen.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/window</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_mark</item>
+        <item name="postSplashScreenTheme">@style/Theme.Anzen</item>
+    </style>
+</resources>

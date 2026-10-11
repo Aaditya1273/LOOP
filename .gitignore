@@ -1,0 +1,24 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# ANZEN
+/contracts/out
+/contracts/cache
+/contracts/broadcast
+/contracts/deployments/31337.json
+backend/.dev
+/.dev
+backend/.venv
+backend/*.db*
+/app/build
+__pycache__/
+.env
+.env.local

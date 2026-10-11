@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Runs the ANZEN agent client from this repo's backend (no install). Prints JSON on stdout.
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="${ANZEN_HOME:-$(cd "$HERE/../../.." && pwd)}"
+PYTHONPATH="$ROOT/backend${PYTHONPATH:+:$PYTHONPATH}" exec uv run --quiet --project "$ROOT/backend" python -m anzen.agent "$@"

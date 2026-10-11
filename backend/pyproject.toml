@@ -1,0 +1,18 @@
+[project]
+name = "anzen"
+version = "0.2.0"
+requires-python = ">=3.12"
+description = "ANZEN service: event policies, check-in issuer and gas relayer for the ANZEN treasury"
+dependencies = [
+    "cryptography>=45",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "web3>=7.6",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "httpx>=0.28"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

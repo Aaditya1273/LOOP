@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Scanning the venue's check-in code. Asked for only when the scanner opens. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Local check-in reminders. Asked for only when the user turns them on. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+
+    <!-- Backups disabled: nothing on this device should be restored onto another (the key can't be anyway). -->
+    <application
+        android:name=".AnzenApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Anzen"
+        tools:targetApi="35">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.Anzen.Starting">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Venue codes scanned with the system camera, passport proofs, reminder taps. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="anzen" android:host="checkin" />
+                <data android:scheme="anzen" android:host="event" />
+                <data android:scheme="anzen" android:host="proof" />
+                <data android:scheme="anzen" android:host="delegate" />
+            </intent-filter>
+        </activity>
+        <receiver android:name=".core.Reminders$Receiver" android:exported="false" />
+    </application>
+
+</manifest>
