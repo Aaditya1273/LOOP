@@ -44,6 +44,7 @@ contract enforces that. **Money can be delegated; presence can't.**
 | **Real passkeys, verified onchain** | WebAuthn assertions (OpenZeppelin `WebAuthn.verify`, user verification required) and Android Keystore keys, both through Monad's P-256 precompile. A judge can sign up in the browser in ten seconds. |
 | **Any agent, one protocol** | An OpenClaw skill and an MCP server ([`.mcp.json`](.mcp.json)) expose the same five tools: setup, events, reserve, budget, reputation. Neither has a check-in tool, because the contract wouldn't accept one. |
 | **Public show-up board** | [`#/agents`](https://anzen-shonko.vercel.app/#/agents) ranks every agent with a budget by the show-up rate the treasury wrote for it. Hosts can see which agents book people who actually come. |
+| **Honest money UI** | Web and Android show only what the chain confirms: every action goes *authorizing → submitting → pending → confirmed*, and "done" appears only after the treasury is re-read. A review screen comes before every signature, and nothing promises that everyone gets paid. |
 | **Real, hosted, tested** | Live on Monad testnet, with proof transactions below. 33 contract tests, a fork test against the **real** ERC-8004 registries, 14 service tests on a real chain (incl. the MCP server over stdio), 22 Android unit tests, browser passkey tests, 11 on-device journeys, and concurrency tests on the live service. |
 
 ## Try it in two minutes
@@ -51,7 +52,8 @@ contract enforces that. **Money can be delegated; presence can't.**
 1. Open **[anzen-shonko.vercel.app](https://anzen-shonko.vercel.app)** and **Create passkey account**.
 2. **Get 100 test dollars** (tUSD, no value).
 3. **Host an event**: choose the *Demo* schedule (commitments close in 4 min, check-in opens at 5).
-4. **Commit** to it with your passkey.
+4. **Review commitment**: one screen shows what you put in, what happens if you come and if you don't, and the
+   check-in window. Only then does the passkey prompt appear.
 5. When check-in opens, **Open check-in desk** on your laptop and scan the QR with your phone's camera.
    On the phone, sign in with the same passkey (iCloud / Google Password Manager sync it), then **Sign check-in**.
 6. After check-in closes, **Apply outcome**: your 5 tUSD comes back with a supporter passport. **View proof** lists
