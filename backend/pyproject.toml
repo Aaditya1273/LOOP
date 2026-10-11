@@ -6,6 +6,7 @@ description = "ANZEN service: event policies, check-in issuer and gas relayer fo
 dependencies = [
     "cryptography>=45",
     "fastapi>=0.115",
+    "psycopg[binary]>=3.2",
     "uvicorn>=0.30",
     "web3>=7.6",
 ]

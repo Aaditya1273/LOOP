@@ -38,7 +38,8 @@ class Settings:
             token=deployment["token"],
             relayer_key=_required("ANZEN_RELAYER_KEY"),
             issuer_key=_required("ANZEN_ISSUER_KEY"),
-            db_path=os.environ.get("ANZEN_DB", str(BACKEND_DIR / "anzen.db")),
+            # Postgres (e.g. Neon) for hosting where the disk doesn't persist; SQLite file otherwise.
+            db_path=os.environ.get("ANZEN_DATABASE_URL") or os.environ.get("ANZEN_DB", str(BACKEND_DIR / "anzen.db")),
             faucet_amount=int(os.environ.get("ANZEN_FAUCET_AMOUNT", "100000000")),  # 100 tUSD
             public_rpc=os.environ.get("ANZEN_PUBLIC_RPC", os.environ["ANZEN_RPC_URL"]),
         )

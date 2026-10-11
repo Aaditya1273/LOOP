@@ -1,0 +1,23 @@
+# Vercel serves the ANZEN service + web app only (index.py). Everything else stays out of the bundle.
+app
+gradle
+gradlew
+gradlew.bat
+build.gradle.kts
+settings.gradle.kts
+gradle.properties
+contracts/lib
+contracts/src
+contracts/test
+contracts/script
+contracts/out
+contracts/cache
+contracts/broadcast
+skills
+scripts
+.dev
+backend/.dev
+backend/.venv
+backend/tests
+**/*.db*
+Dockerfile

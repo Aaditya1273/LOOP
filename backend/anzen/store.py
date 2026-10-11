@@ -30,9 +30,52 @@ CREATE TABLE IF NOT EXISTS desks (token TEXT PRIMARY KEY, event_id INTEGER NOT N
 """
 
 
-def connect(path: str | Path) -> sqlite3.Connection:
+def connect(path: str | Path):
+    """SQLite file, or Postgres when given a postgres:// URL (see Postgres)."""
+    if str(path).startswith(("postgres://", "postgresql://")):
+        return Postgres(str(path))
     db = sqlite3.connect(path, check_same_thread=False)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
     db.executescript(SCHEMA)
     return db
+
+
+class Postgres:
+    """The few sqlite3.Connection behaviours the service relies on, over Postgres (Neon), for hosting where the
+    disk doesn't persist: `?` placeholders, INSERT OR IGNORE, dict rows, `with db:` transactions, and
+    sqlite3.IntegrityError on a unique-key clash."""
+
+    def __init__(self, url: str):
+        import psycopg
+        from psycopg.rows import dict_row
+        self._psycopg = psycopg
+        self.conn = psycopg.connect(url, autocommit=True, row_factory=dict_row)
+        self._tx = None
+        import re
+        for stmt in re.sub(r"--[^\n]*", "", SCHEMA).split(";"):
+            if stmt.strip():
+                self.conn.execute(stmt)
+
+    def execute(self, sql: str, params: tuple = ()):
+        ignore = sql.lstrip().upper().startswith("INSERT OR IGNORE")
+        sql = sql.replace("INSERT OR IGNORE", "INSERT").replace("?", "%s") + (" ON CONFLICT DO NOTHING" if ignore else "")
+        try:
+            return self.conn.execute(sql, params)  # inside `with db:` this runs in the open transaction
+        except self._psycopg.IntegrityError as e:
+            raise sqlite3.IntegrityError(str(e)) from None
+
+    def commit(self) -> None:  # autocommit outside `with`
+        pass
+
+    def __enter__(self):
+        self._tx = self.conn.transaction()
+        self._tx.__enter__()
+        return self
+
+    def __exit__(self, *exc):
+        tx, self._tx = self._tx, None
+        try:
+            return tx.__exit__(*exc)
+        except self._psycopg.IntegrityError as e:
+            raise sqlite3.IntegrityError(str(e)) from None

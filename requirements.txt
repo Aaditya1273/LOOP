@@ -1,0 +1,4 @@
+fastapi>=0.115
+web3>=7.6
+cryptography>=45
+psycopg[binary]>=3.2
