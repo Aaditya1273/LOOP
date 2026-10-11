@@ -261,7 +261,8 @@ object Links {
                 val agent = q.getValue("agent")
                 val cap = q["cap"]?.toLongOrNull()?.coerceIn(1, 1000) ?: 20
                 val days = q["days"]?.toIntOrNull()?.coerceIn(1, 30) ?: 7
-                if (ADDRESS.matches(agent)) "agent?agent=$agent&cap=$cap&days=$days" else null
+                val id = q["id"]?.toLongOrNull()?.takeIf { it >= 0 }
+                if (ADDRESS.matches(agent)) "agent?agent=$agent&cap=$cap&days=$days" + (id?.let { "&id=$it" } ?: "") else null
             }
             "proof" -> {
                 val e = q.getValue("e").toLong()

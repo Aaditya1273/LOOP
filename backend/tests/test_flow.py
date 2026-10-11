@@ -38,7 +38,7 @@ def test_full_lifecycle_split_forfeit(env):
     assert a["balance"] == 110_000_000  # stake back + bob's forfeited 10
     assert a["commitments"][0]["me"] == {"status": "settled", "attended": True,
                                          "checkedInAt": a["commitments"][0]["me"]["checkedInAt"],
-                                         "settledAmount": 20_000_000, "passportId": 1}
+                                         "settledAmount": 20_000_000, "passportId": 1, "agentId": None}
     assert env.client.get(f"/accounts/{bob.id}").json()["balance"] == 90_000_000
 
     proof = env.client.get(f"/proof/{eid}/{alice.id}").json()
@@ -149,6 +149,34 @@ def test_check_in_failures(env):
     assert env.check_in(alice, eid, forged).status_code >= 400
 
 
+def test_webauthn_passkey_assertion_accepted(env):
+    """A browser passkey: the service and contract accept a WebAuthn assertion whose challenge is the action digest."""
+    import base64
+    import hashlib
+
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+    from eth_abi import encode
+
+    from anzen import messages
+    from anzen.p256 import N, WEBAUTHN_AUTH
+    org, alice = Key(), Key()
+    env.fund(alice)
+    eid = env.create_event(org)
+    deadline = env.now() + 600
+    msg = messages.commit(env.chain_id, env.treasury, eid, 10_000_000, 0, deadline)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(msg).digest()).rstrip(b"=").decode()
+    client = '{"type":"webauthn.get","challenge":"' + challenge + '","origin":"https://anzen.app","crossOrigin":false}'
+    auth_data = hashlib.sha256(b"anzen.app").digest() + bytes([0x05]) + (1).to_bytes(4, "big")
+    signed = auth_data + hashlib.sha256(client.encode()).digest()
+    r, s = decode_dss_signature(alice.sk.sign(signed, ec.ECDSA(hashes.SHA256())))
+    auth = encode([WEBAUTHN_AUTH], [(r.to_bytes(32, "big"), min(s, N - s).to_bytes(32, "big"), 23, 1, auth_data, client)])
+    body = {"qx": "0x" + alice.qx.hex(), "qy": "0x" + alice.qy.hex(), "auth": "0x" + auth.hex(), "deadline": deadline}
+    env.confirm(env.client.post(f"/events/{eid}/commit", json=body).json()["tx"])
+    assert env.client.get(f"/events/{eid}", params={"key": alice.id}).json()["me"]["status"] == "committed"
+
+
 def test_settle_before_close_rejected(env):
     org, alice = Key(), Key()
     env.fund(alice)
@@ -183,9 +211,10 @@ def test_agent_reserves_within_owner_budget_but_cannot_check_in(env):
     # Alice's phone signs a 20 tUSD budget for her agent, valid 7 days.
     now = env.now()
     deadline, expiry, cap = now + 600, now + 7 * 86_400, 20_000_000
-    sig = alice.sign(messages.delegate(env.chain_id, env.treasury, agent.address, cap, expiry,
+    sig = alice.sign(messages.delegate(env.chain_id, env.treasury, agent.address, messages.NO_AGENT_ID, cap, expiry,
                                        env.svc.chain.nonce(bytes.fromhex(alice.id[2:])), deadline))
-    r = env.client.post("/delegate", json={"agent": agent.address, "cap": cap, "expiry": expiry, "deadline": deadline, **sig})
+    r = env.client.post("/delegate", json={"agent": agent.address, "agentId": messages.NO_AGENT_ID, "cap": cap,
+                                          "expiry": expiry, "deadline": deadline, **sig})
     env.confirm(r.json()["tx"])
     d = env.client.get(f"/accounts/{alice.id}").json()["delegation"]
     assert d["active"] and d["remaining"] == cap

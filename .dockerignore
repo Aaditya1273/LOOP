@@ -1,0 +1,14 @@
+**/.venv
+**/__pycache__
+**/*.db*
+.dev
+backend/.dev
+.env*
+!backend/.env.example
+app
+contracts/lib
+contracts/out
+contracts/cache
+contracts/broadcast
+.playwright-mcp
+.gradle

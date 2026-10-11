@@ -49,7 +49,7 @@ private val ADDRESS = Regex("^0x[0-9a-fA-F]{40}$")
  * anzen://delegate link (which pre-fills the request; the owner decides the real cap).
  */
 @Composable
-fun AgentScreen(agentArg: String?, capArg: Long?, daysArg: Int?, vm: AppViewModel, back: () -> Unit) {
+fun AgentScreen(agentArg: String?, capArg: Long?, daysArg: Int?, agentIdArg: Long?, vm: AppViewModel, back: () -> Unit) {
     val c = Anzen.colors
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -86,7 +86,15 @@ fun AgentScreen(agentArg: String?, capArg: Long?, daysArg: Int?, vm: AppViewMode
                 Text("of ${Format.amount(d.cap)} $symbol · until ${Format.dateTime(d.expiry)}", style = AnzenType.callout, color = c.onSealed)
             }
             Gap(12)
-            Panel { InfoRow("Agent", Format.shortHex(d.agent), mono = true, copy = d.agent) }
+            Panel {
+                InfoRow("Agent", Format.shortHex(d.agent), mono = true, copy = d.agent)
+                d.agentId?.let { InfoRow("ERC-8004 identity", "#$it") }
+                d.reputation?.let { r ->
+                    InfoRow("Show-up reputation", r.showUpRate?.let { "${"%.0f".format(it)}% of ${r.count}" } ?: "No settled reservations yet")
+                    Text("Only feedback written by the ANZEN treasury counts: each point is a real commitment and a " +
+                        "verified check-in, so it can't be farmed by fake reviewers.", style = AnzenType.caption, color = c.textSecondary)
+                }
+            }
         } else if (!requested) {
             InfoNote("No active budget. Connect an agent such as OpenClaw with the ANZEN skill; it will send you an " +
                 "approval link, or you can paste its address below.")
@@ -117,7 +125,8 @@ fun AgentScreen(agentArg: String?, capArg: Long?, daysArg: Int?, vm: AppViewMode
                 if (tx is TxState.Failed) { TxProgress(tx, ""); Gap(12) }
                 PrimaryButton("Approve ${capBase?.let { Format.amount(it) } ?: "—"} $symbol for $days day" + if (days > 1) "s" else "",
                     enabled = ADDRESS.matches(agent) && capBase != null && s.health != null) {
-                    ctx.activity()?.let { a -> action.run { delegate(a, agent, capBase!!, now + days * 86_400L, it) } }
+                    val id = (agentIdArg ?: d?.agentId?.takeIf { d.agent.equals(agent, true) })?.toBigInteger() ?: com.anzen.core.Messages.NO_AGENT_ID
+                    ctx.activity()?.let { a -> action.run { delegate(a, agent, id, capBase!!, now + days * 86_400L, it) } }
                 }
                 if (d?.active == true) {
                     Gap(8)
@@ -129,6 +138,6 @@ fun AgentScreen(agentArg: String?, capArg: Long?, daysArg: Int?, vm: AppViewMode
     }
     if (confirmRevoke) ConfirmDialog("Revoke your agent's budget?", "It won't be able to reserve anything. Places it already " +
         "reserved stay yours.", "Revoke", destructive = true,
-        onConfirm = { confirmRevoke = false; ctx.activity()?.let { a -> action.run { delegate(a, ZERO, 0, 0, it) } } },
+        onConfirm = { confirmRevoke = false; ctx.activity()?.let { a -> action.run { delegate(a, ZERO, com.anzen.core.Messages.NO_AGENT_ID, 0, 0, it) } } },
         onDismiss = { confirmRevoke = false })
 }

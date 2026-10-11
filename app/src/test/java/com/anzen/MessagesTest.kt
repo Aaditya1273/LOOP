@@ -38,8 +38,8 @@ class MessagesTest {
     @Test fun cancel() = assertEquals("4d1419ebdaf75c90bdf278e1a891c8dea667214e9df00fb351211aa760ac5224",
         h(Messages.cancel(10143, t, 7, 5, 1_800_000_600)))
 
-    @Test fun delegate() = assertEquals("d65bf988f06535a15a71611cebfbaf39dffcbbb8d0b4480d21bd274572982e80",
-        h(Messages.delegate(10143, t, issuer, 20_000_000, 1_800_604_800, 6, 1_800_000_600)))
+    @Test fun delegate() = assertEquals("1b93458a85a0df0e491a02d9b363f53722a038ff5d9b02ba1d1e4ce081e98049",
+        h(Messages.delegate(10143, t, issuer, BigInteger.valueOf(7), 20_000_000, 1_800_604_800, 6, 1_800_000_600)))
 
     @Test fun desk() = assertEquals("ae130c5e88daa4d2c6aac044edeb9e72ece35b4a6cfec8bf8511d82a266430ab",
         h(Messages.desk(10143, t, 7, 1_800_000_300)))

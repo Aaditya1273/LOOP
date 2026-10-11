@@ -21,7 +21,10 @@ import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 /** A signature as the contract takes it: the key's coordinates and a low-s (r, s). */
-data class P256Signature(val qx: String, val qy: String, val r: String, val s: String)
+data class P256Signature(val qx: String, val qy: String, val r: String, val s: String) {
+    /** What the contract takes: 64 bytes r ‖ s (the raw P-256 path; passkeys send a WebAuthn assertion instead). */
+    val auth: String get() = r + s.removePrefix("0x")
+}
 
 class AuthorizationCancelled : Exception("authorization cancelled")
 class AuthorizationUnavailable(msg: String) : Exception(msg)

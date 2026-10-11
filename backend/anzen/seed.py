@@ -2,7 +2,7 @@
 
   uv run python -m anzen.seed events        publish sample events from a seed organizer key
   uv run python -m anzen.seed quick <title>  publish one event: commitments close in 10 min, check-in in 15
-  uv run python -m anzen.seed owner [agent cap]  dev stand-in for the phone: fund the seed key, approve a budget
+  uv run python -m anzen.seed owner [agent cap id]  dev stand-in for the phone: fund the seed key, approve a budget
   uv run python -m anzen.seed desk <id>     print a live venue code (anzen:// link) for a seeded event
   uv run python -m anzen.seed checkin <id>  same, as an adb command that opens it in the app
 
@@ -54,7 +54,7 @@ def sign(sk, message: bytes) -> dict:
     n = sk.public_key().public_numbers()
     r, s = decode_dss_signature(sk.sign(message, ec.ECDSA(hashes.SHA256())))
     return {"qx": "0x" + n.x.to_bytes(32, "big").hex(), "qy": "0x" + n.y.to_bytes(32, "big").hex(),
-            "r": "0x" + r.to_bytes(32, "big").hex(), "s": "0x" + min(s, N - s).to_bytes(32, "big").hex()}
+            "auth": "0x" + r.to_bytes(32, "big").hex() + min(s, N - s).to_bytes(32, "big").hex()}
 
 
 def key_id(sk) -> bytes:
@@ -135,10 +135,12 @@ if __name__ == "__main__":
             wait(http("POST", "/faucet", {"keyId": kid})["tx"])
         if len(sys.argv) > 2:
             agent, cap = sys.argv[2], int(float(sys.argv[3] if len(sys.argv) > 3 else 20) * 1_000_000)
+            agent_id = int(sys.argv[4]) if len(sys.argv) > 4 else messages.NO_AGENT_ID
             expiry, deadline = h["now"] + 7 * 86_400, h["now"] + 600
             nonce = http("GET", f"/accounts/{kid}")["nonce"]
-            sig = sign(sk, messages.delegate(h["chainId"], h["treasury"], agent, cap, expiry, nonce, deadline))
-            wait(http("POST", "/delegate", {"agent": agent, "cap": cap, "expiry": expiry, "deadline": deadline, **sig})["tx"])
+            sig = sign(sk, messages.delegate(h["chainId"], h["treasury"], agent, agent_id, cap, expiry, nonce, deadline))
+            wait(http("POST", "/delegate", {"agent": agent, "agentId": agent_id, "cap": cap, "expiry": expiry,
+                                            "deadline": deadline, **sig})["tx"])
         print(kid)
     elif cmd == "desk":
         print(venue_code(int(sys.argv[2])))

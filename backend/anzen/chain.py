@@ -14,11 +14,13 @@ from web3.exceptions import ContractCustomError, ContractLogicError, Transaction
 
 from .errors import AnzenError, Reason
 
-ARTIFACTS = Path(__file__).resolve().parents[2] / "contracts" / "out"
+ARTIFACTS = Path(__file__).resolve().parents[2] / "contracts" / "out"  # forge build output (tests deploy from it)
+ABIS = Path(__file__).resolve().parent / "abi"  # committed copies, so a deployed service needs no Foundry
 
 
 def _abi(name: str) -> list:
-    return json.loads((ARTIFACTS / f"{name}.sol" / f"{name}.json").read_text())["abi"]
+    built = ARTIFACTS / f"{name}.sol" / f"{name}.json"
+    return json.loads(built.read_text())["abi"] if built.exists() else json.loads((ABIS / f"{name}.json").read_text())
 
 
 class Chain:
@@ -44,8 +46,14 @@ class Chain:
         return self._chain_id
 
     def now(self) -> int:
-        """Chain time. Wall clock can lag a local chain that was fast-forwarded, so take the later."""
-        return max(int(time.time()), self._rpc(lambda: self.w3.eth.get_block("latest")["timestamp"]))
+        """Chain time: the timestamp the next block will carry. On a quiet local chain the latest block can be minutes
+        old, and a fast-forwarded one runs ahead of the wall clock; the pending block is right in both cases."""
+        try:
+            return self._rpc(lambda: self.w3.eth.get_block("pending")["timestamp"])
+        except AnzenError:
+            raise
+        except Exception:
+            return max(int(time.time()), self._rpc(lambda: self.w3.eth.get_block("latest")["timestamp"]))
 
     def event(self, event_id: int) -> tuple[dict, dict]:
         c, s = self._rpc(lambda: self.treasury.functions.getEvent(event_id).call())
@@ -56,7 +64,7 @@ class Chain:
 
     def participation(self, event_id: int, key_id: bytes) -> dict:
         p = self._rpc(lambda: self.treasury.functions.participation(event_id, key_id).call())
-        return dict(zip(["status", "attended", "checked_in_at", "settled_amount", "passport_id"], p))
+        return dict(zip(["status", "attended", "checked_in_at", "settled_amount", "passport_id", "agent_ref"], p))
 
     def balance(self, key_id: bytes) -> int:
         return self._rpc(lambda: self.treasury.functions.balanceOf(key_id).call())
@@ -66,7 +74,30 @@ class Chain:
 
     def delegation(self, key_id: bytes) -> dict:
         d = self._rpc(lambda: self.treasury.functions.delegationOf(key_id).call())
-        return dict(zip(["agent", "cap", "spent", "expiry"], d))
+        return dict(zip(["agent", "cap", "spent", "expiry", "agent_ref"], d))
+
+    @property
+    def registries(self) -> tuple[str | None, str | None]:
+        """The ERC-8004 identity and reputation registries this treasury reports to (None where not deployed)."""
+        if not hasattr(self, "_registries"):
+            ident = self._rpc(lambda: self.treasury.functions.identityRegistry().call())
+            rep = self._rpc(lambda: self.treasury.functions.reputationRegistry().call())
+            zero = "0x0000000000000000000000000000000000000000"
+            self._registries = (None if ident == zero else ident, None if rep == zero else rep)
+        return self._registries
+
+    def show_up(self, agent_id: int) -> dict:
+        """Show-up reputation as reported by THIS treasury only (the Sybil-proof client), from the ERC-8004
+        reputation registry: count of agent reservations settled, and the share that ended in a check-in."""
+        rep = self.registries[1]
+        if rep is None:
+            return {"count": 0, "showUpRate": None, "registry": None}
+        abi = [{"name": "getSummary", "type": "function", "stateMutability": "view",
+                "inputs": [{"type": "uint256"}, {"type": "address[]"}, {"type": "string"}, {"type": "string"}],
+                "outputs": [{"type": "uint64"}, {"type": "int128"}, {"type": "uint8"}]}]
+        c = self.w3.eth.contract(address=rep, abi=abi)
+        count, value, decimals = self._rpc(lambda: c.functions.getSummary(agent_id, [self.treasury.address], "showUp", "anzen").call())
+        return {"count": count, "showUpRate": (value / 10 ** decimals) if count else None, "registry": rep}
 
     def agent_nonce(self, agent: str) -> int:
         return self._rpc(lambda: self.treasury.functions.agentNonces(Web3.to_checksum_address(agent)).call())
@@ -94,7 +125,7 @@ class Chain:
         """Simulate, then broadcast. A revert is reported with the contract's error name and nothing is sent."""
         with self.lock:
             try:
-                gas = call.estimate_gas({"from": self.relayer.address})
+                gas = call.estimate_gas({"from": self.relayer.address}, block_identifier="pending")
             except ContractCustomError as e:
                 data = e.data if isinstance(e.data, str) else ""
                 name = self.errors.get(data[:10], "Reverted")
@@ -109,6 +140,14 @@ class Chain:
             })
             signed = self.relayer.sign_transaction(tx)
             return "0x" + self._rpc(lambda: self.w3.eth.send_raw_transaction(signed.raw_transaction)).hex().removeprefix("0x")
+
+    def send_value(self, to: str, wei: int) -> str:
+        with self.lock:
+            tx = {"to": to, "value": wei, "gas": 21_000, "chainId": self.chain_id,
+                  "nonce": self._rpc(lambda: self.w3.eth.get_transaction_count(self.relayer.address, "pending")),
+                  "maxFeePerGas": self._rpc(lambda: self.w3.eth.gas_price) * 2, "maxPriorityFeePerGas": 10**9}
+            return "0x" + self._rpc(lambda: self.w3.eth.send_raw_transaction(
+                self.relayer.sign_transaction(tx).raw_transaction)).hex().removeprefix("0x")
 
     def wait(self, tx: str, timeout: float = 30) -> dict:
         return self._rpc(lambda: self.w3.eth.wait_for_transaction_receipt(tx, timeout=timeout, poll_latency=0.25))

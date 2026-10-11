@@ -39,7 +39,7 @@ class Key:
         r, s = decode_dss_signature(self.sk.sign(message, ec.ECDSA(hashes.SHA256())))
         s = min(s, N - s)
         return {"qx": "0x" + self.qx.hex(), "qy": "0x" + self.qy.hex(),
-                "r": "0x" + r.to_bytes(32, "big").hex(), "s": "0x" + s.to_bytes(32, "big").hex()}
+                "auth": "0x" + r.to_bytes(32, "big").hex() + s.to_bytes(32, "big").hex()}
 
 
 def _free_port() -> int:
@@ -81,7 +81,8 @@ def env(anvil, tmp_path: Path):
     snap = w3.provider.make_request("evm_snapshot", [])["result"]
     relayer = w3.eth.account.from_key(RELAYER).address
     token = _deploy(w3, "TestDollar", relayer)
-    treasury = _deploy(w3, "AnzenTreasury", token)
+    zero = "0x0000000000000000000000000000000000000000"
+    treasury = _deploy(w3, "AnzenTreasury", token, zero, zero)  # no ERC-8004 registries on a bare local chain
     svc = Anzen(store.connect(tmp_path / "anzen.db"), Chain(url, treasury, token, RELAYER, ISSUER),
                 faucet_amount=100_000_000)
     yield Env(w3, svc, TestClient(create_app(svc)))

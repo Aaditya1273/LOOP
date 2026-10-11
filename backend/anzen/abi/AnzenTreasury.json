@@ -1,0 +1,1183 @@
+[
+ {
+  "type": "constructor",
+  "inputs": [
+   {
+    "name": "asset_",
+    "type": "address",
+    "internalType": "contract IERC20"
+   },
+   {
+    "name": "identity_",
+    "type": "address",
+    "internalType": "contract IERC8004Identity"
+   },
+   {
+    "name": "reputation_",
+    "type": "address",
+    "internalType": "contract IERC8004Reputation"
+   }
+  ],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "NO_AGENT_ID",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "REPUTATION_GAS",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "agentNonces",
+  "inputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "asset",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "contract IERC20"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "balanceOf",
+  "inputs": [
+   {
+    "name": "",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "cancelEvent",
+  "inputs": [
+   {
+    "name": "eventId",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "qx",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "qy",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "deadline",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "auth",
+    "type": "bytes",
+    "internalType": "bytes"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "checkIn",
+  "inputs": [
+   {
+    "name": "eventId",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "qx",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "qy",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "challenge",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "expiresAt",
+    "type": "uint64",
+    "internalType": "uint64"
+   },
+   {
+    "name": "issuerSig",
+    "type": "bytes",
+    "internalType": "bytes"
+   },
+   {
+    "name": "auth",
+    "type": "bytes",
+    "internalType": "bytes"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "commit",
+  "inputs": [
+   {
+    "name": "eventId",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "qx",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "qy",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "deadline",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "auth",
+    "type": "bytes",
+    "internalType": "bytes"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "commitByAgent",
+  "inputs": [
+   {
+    "name": "eventId",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "keyId",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "deadline",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "agentSig",
+    "type": "bytes",
+    "internalType": "bytes"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "createEvent",
+  "inputs": [
+   {
+    "name": "c",
+    "type": "tuple",
+    "internalType": "struct AnzenTreasury.EventConfig",
+    "components": [
+     {
+      "name": "organizer",
+      "type": "bytes32",
+      "internalType": "bytes32"
+     },
+     {
+      "name": "policyHash",
+      "type": "bytes32",
+      "internalType": "bytes32"
+     },
+     {
+      "name": "issuer",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "amount",
+      "type": "uint128",
+      "internalType": "uint128"
+     },
+     {
+      "name": "capacity",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "commitDeadline",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "checkInStart",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "checkInEnd",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "noShow",
+      "type": "uint8",
+      "internalType": "enum AnzenTreasury.NoShow"
+     }
+    ]
+   },
+   {
+    "name": "qx",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "qy",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "deadline",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "auth",
+    "type": "bytes",
+    "internalType": "bytes"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "eventId",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "delegate",
+  "inputs": [
+   {
+    "name": "qx",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "qy",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "agent",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "agentId",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "cap",
+    "type": "uint128",
+    "internalType": "uint128"
+   },
+   {
+    "name": "expiry",
+    "type": "uint64",
+    "internalType": "uint64"
+   },
+   {
+    "name": "deadline",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "auth",
+    "type": "bytes",
+    "internalType": "bytes"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "delegationOf",
+  "inputs": [
+   {
+    "name": "",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "agent",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "cap",
+    "type": "uint128",
+    "internalType": "uint128"
+   },
+   {
+    "name": "spent",
+    "type": "uint128",
+    "internalType": "uint128"
+   },
+   {
+    "name": "expiry",
+    "type": "uint64",
+    "internalType": "uint64"
+   },
+   {
+    "name": "agentRef",
+    "type": "uint64",
+    "internalType": "uint64"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "depositFor",
+  "inputs": [
+   {
+    "name": "keyId",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "amount",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "eventCount",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "finalize",
+  "inputs": [
+   {
+    "name": "eventId",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "getEvent",
+  "inputs": [
+   {
+    "name": "eventId",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "tuple",
+    "internalType": "struct AnzenTreasury.EventConfig",
+    "components": [
+     {
+      "name": "organizer",
+      "type": "bytes32",
+      "internalType": "bytes32"
+     },
+     {
+      "name": "policyHash",
+      "type": "bytes32",
+      "internalType": "bytes32"
+     },
+     {
+      "name": "issuer",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "amount",
+      "type": "uint128",
+      "internalType": "uint128"
+     },
+     {
+      "name": "capacity",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "commitDeadline",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "checkInStart",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "checkInEnd",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "noShow",
+      "type": "uint8",
+      "internalType": "enum AnzenTreasury.NoShow"
+     }
+    ]
+   },
+   {
+    "name": "",
+    "type": "tuple",
+    "internalType": "struct AnzenTreasury.EventState",
+    "components": [
+     {
+      "name": "committed",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "attended",
+      "type": "uint32",
+      "internalType": "uint32"
+     },
+     {
+      "name": "cancelled",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "finalized",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "attendeePayout",
+      "type": "uint128",
+      "internalType": "uint128"
+     }
+    ]
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "identityRegistry",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "contract IERC8004Identity"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "keyIdOf",
+  "inputs": [
+   {
+    "name": "qx",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "qy",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ],
+  "stateMutability": "pure"
+ },
+ {
+  "type": "function",
+  "name": "nonces",
+  "inputs": [
+   {
+    "name": "",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "participation",
+  "inputs": [
+   {
+    "name": "eventId",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "keyId",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "tuple",
+    "internalType": "struct AnzenTreasury.Participation",
+    "components": [
+     {
+      "name": "status",
+      "type": "uint8",
+      "internalType": "enum AnzenTreasury.Status"
+     },
+     {
+      "name": "attended",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "checkedInAt",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "settledAmount",
+      "type": "uint128",
+      "internalType": "uint128"
+     },
+     {
+      "name": "passportId",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "agentRef",
+      "type": "uint64",
+      "internalType": "uint64"
+     }
+    ]
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "passportCount",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint64",
+    "internalType": "uint64"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "reputationRegistry",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "contract IERC8004Reputation"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "settle",
+  "inputs": [
+   {
+    "name": "eventId",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "keyId",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "withdraw",
+  "inputs": [
+   {
+    "name": "qx",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "qy",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "to",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "amount",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "deadline",
+    "type": "uint256",
+    "internalType": "uint256"
+   },
+   {
+    "name": "auth",
+    "type": "bytes",
+    "internalType": "bytes"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "event",
+  "name": "AgentCommitted",
+  "inputs": [
+   {
+    "name": "eventId",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "keyId",
+    "type": "bytes32",
+    "indexed": true,
+    "internalType": "bytes32"
+   },
+   {
+    "name": "agent",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "amount",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "CheckedIn",
+  "inputs": [
+   {
+    "name": "eventId",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "keyId",
+    "type": "bytes32",
+    "indexed": true,
+    "internalType": "bytes32"
+   },
+   {
+    "name": "challenge",
+    "type": "bytes32",
+    "indexed": false,
+    "internalType": "bytes32"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Committed",
+  "inputs": [
+   {
+    "name": "eventId",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "keyId",
+    "type": "bytes32",
+    "indexed": true,
+    "internalType": "bytes32"
+   },
+   {
+    "name": "amount",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Delegated",
+  "inputs": [
+   {
+    "name": "keyId",
+    "type": "bytes32",
+    "indexed": true,
+    "internalType": "bytes32"
+   },
+   {
+    "name": "agent",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "cap",
+    "type": "uint128",
+    "indexed": false,
+    "internalType": "uint128"
+   },
+   {
+    "name": "expiry",
+    "type": "uint64",
+    "indexed": false,
+    "internalType": "uint64"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Deposited",
+  "inputs": [
+   {
+    "name": "keyId",
+    "type": "bytes32",
+    "indexed": true,
+    "internalType": "bytes32"
+   },
+   {
+    "name": "from",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "amount",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "EventCancelled",
+  "inputs": [
+   {
+    "name": "eventId",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "EventCreated",
+  "inputs": [
+   {
+    "name": "eventId",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "organizer",
+    "type": "bytes32",
+    "indexed": true,
+    "internalType": "bytes32"
+   },
+   {
+    "name": "policyHash",
+    "type": "bytes32",
+    "indexed": false,
+    "internalType": "bytes32"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "EventFinalized",
+  "inputs": [
+   {
+    "name": "eventId",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "attended",
+    "type": "uint32",
+    "indexed": false,
+    "internalType": "uint32"
+   },
+   {
+    "name": "attendeePayout",
+    "type": "uint128",
+    "indexed": false,
+    "internalType": "uint128"
+   },
+   {
+    "name": "organizerShare",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "PassportIssued",
+  "inputs": [
+   {
+    "name": "eventId",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "keyId",
+    "type": "bytes32",
+    "indexed": true,
+    "internalType": "bytes32"
+   },
+   {
+    "name": "passportId",
+    "type": "uint64",
+    "indexed": false,
+    "internalType": "uint64"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Settled",
+  "inputs": [
+   {
+    "name": "eventId",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "keyId",
+    "type": "bytes32",
+    "indexed": true,
+    "internalType": "bytes32"
+   },
+   {
+    "name": "attended",
+    "type": "bool",
+    "indexed": false,
+    "internalType": "bool"
+   },
+   {
+    "name": "amount",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "ShowUpReported",
+  "inputs": [
+   {
+    "name": "agentId",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "eventId",
+    "type": "uint256",
+    "indexed": true,
+    "internalType": "uint256"
+   },
+   {
+    "name": "keyId",
+    "type": "bytes32",
+    "indexed": true,
+    "internalType": "bytes32"
+   },
+   {
+    "name": "attended",
+    "type": "bool",
+    "indexed": false,
+    "internalType": "bool"
+   },
+   {
+    "name": "posted",
+    "type": "bool",
+    "indexed": false,
+    "internalType": "bool"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Withdrawn",
+  "inputs": [
+   {
+    "name": "keyId",
+    "type": "bytes32",
+    "indexed": true,
+    "internalType": "bytes32"
+   },
+   {
+    "name": "to",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "amount",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "error",
+  "name": "AgentIdentityMismatch",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "AlreadyCommitted",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "AlreadySettled",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BudgetExceeded",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "ECDSAInvalidSignature",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "ECDSAInvalidSignatureLength",
+  "inputs": [
+   {
+    "name": "length",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ]
+ },
+ {
+  "type": "error",
+  "name": "ECDSAInvalidSignatureS",
+  "inputs": [
+   {
+    "name": "s",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ]
+ },
+ {
+  "type": "error",
+  "name": "EventFull",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "Expired",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "InsufficientBalance",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "InsufficientGasForReputation",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "InvalidConfig",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "InvalidSignature",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotCommitted",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotDelegated",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotOrganizer",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "SafeERC20FailedOperation",
+  "inputs": [
+   {
+    "name": "token",
+    "type": "address",
+    "internalType": "address"
+   }
+  ]
+ },
+ {
+  "type": "error",
+  "name": "UnknownEvent",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "WrongPhase",
+  "inputs": []
+ }
+]

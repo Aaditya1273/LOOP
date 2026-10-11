@@ -35,7 +35,12 @@ data class Health(
 )
 
 @Serializable
-data class Me(val status: String, val attended: Boolean, val checkedInAt: Long, val settledAmount: Long, val passportId: Long)
+data class Me(val status: String, val attended: Boolean, val checkedInAt: Long, val settledAmount: Long, val passportId: Long,
+              /** ERC-8004 id of the agent that reserved this place; null when the owner did. */
+              val agentId: Long? = null)
+
+/** An agent's show-up rate as reported by the ANZEN treasury itself (ERC-8004 reputation, client = treasury). */
+@Serializable data class Reputation(val count: Long, val showUpRate: Double? = null, val registry: String? = null)
 
 @Serializable
 data class Event(
@@ -48,7 +53,8 @@ data class Event(
 )
 
 @Serializable
-data class Delegation(val agent: String, val cap: Long, val spent: Long, val expiry: Long, val active: Boolean, val remaining: Long)
+data class Delegation(val agent: String, val cap: Long, val spent: Long, val expiry: Long, val active: Boolean, val remaining: Long,
+                      val agentId: Long? = null, val reputation: Reputation? = null)
 
 @Serializable
 data class Account(
@@ -105,8 +111,8 @@ class Api @Inject constructor(private val http: HttpClient) {
     suspend fun checkIn(eventId: Long, c: VenueCode, sig: P256Signature) = submit("/events/$eventId/checkin",
         signed(sig, "challenge" to c.challenge, "expiresAt" to c.expiresAt, "issuerSig" to c.issuerSig))
 
-    suspend fun delegate(agent: String, cap: Long, expiry: Long, deadline: Long, sig: P256Signature) =
-        submit("/delegate", signed(sig, "agent" to agent, "cap" to cap, "expiry" to expiry, "deadline" to deadline))
+    suspend fun delegate(agent: String, agentId: java.math.BigInteger, cap: Long, expiry: Long, deadline: Long, sig: P256Signature) =
+        submit("/delegate", signed(sig, "agent" to agent, "agentId" to agentId, "cap" to cap, "expiry" to expiry, "deadline" to deadline))
 
     suspend fun openDesk(eventId: Long, deadline: Long, sig: P256Signature): Desk =
         json.decodeFromString(post("/events/$eventId/desk", signed(sig, "deadline" to deadline)))
@@ -122,8 +128,8 @@ class Api @Inject constructor(private val http: HttpClient) {
     }
 
     private fun signed(sig: P256Signature, vararg extra: Pair<String, Any>) = buildJsonObject {
-        put("qx", sig.qx); put("qy", sig.qy); put("r", sig.r); put("s", sig.s)
-        extra.forEach { (k, v) -> put(k, if (v is Number) JsonPrimitive(v) else JsonPrimitive(v.toString())) }
+        put("qx", sig.qx); put("qy", sig.qy); put("auth", sig.auth)
+        extra.forEach { (k, v) -> put(k, when (v) { is Number -> JsonPrimitive(v); else -> JsonPrimitive(v.toString()) }) }
     }
 
     private suspend fun submit(path: String, body: JsonObject): String =

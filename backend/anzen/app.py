@@ -2,8 +2,11 @@
 
 import logging
 import os
+from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -18,11 +21,11 @@ HEX32 = r"^0x[0-9a-fA-F]{64}$"
 
 
 class Signed(BaseModel):
-    """A P-256 key and its low-s signature (r, s) over the action's preimage (see messages.py)."""
+    """A P-256 account key and its authorization of the action's preimage (see messages.py): 64 bytes r ‖ s
+    (Android Keystore), or an abi-encoded WebAuthn assertion whose challenge is sha256(preimage) (passkeys)."""
     qx: str = Field(pattern=HEX32)
     qy: str = Field(pattern=HEX32)
-    r: str = Field(pattern=HEX32)
-    s: str = Field(pattern=HEX32)
+    auth: str = Field(pattern=r"^0x[0-9a-fA-F]{128,8192}$")
 
 
 class WithDeadline(Signed):
@@ -54,6 +57,7 @@ class CheckIn(Signed):
 
 class Delegate(WithDeadline):
     agent: str = Field(pattern=r"^0x[0-9a-fA-F]{40}$")
+    agentId: int = Field(ge=0, lt=2**256, description="ERC-8004 agentId, or 2**256-1 for none")
     cap: int = Field(ge=0, lt=2**128)
     expiry: int = Field(ge=0, lt=2**64)
 
@@ -70,12 +74,14 @@ class KeyBody(BaseModel):
 
 def build_service(s: Settings) -> Anzen:
     chain = Chain(s.rpc_url, s.treasury, s.token, s.relayer_key, s.issuer_key)
-    return Anzen(store.connect(s.db_path), chain, faucet_amount=s.faucet_amount)
+    return Anzen(store.connect(s.db_path), chain, faucet_amount=s.faucet_amount, public_rpc=s.public_rpc)
 
 
 def create_app(svc: Anzen | None = None) -> FastAPI:
     svc = svc or build_service(Settings.from_env())
-    app = FastAPI(title="ANZEN service", version="0.2.0")
+    app = FastAPI(title="ANZEN service", version="0.3.0")
+    # The web app runs on another origin. No cookies or credentials exist: every write is a signed action.
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"], allow_headers=["Content-Type"])
 
     @app.exception_handler(AnzenError)
     async def anzen_error(_: Request, e: AnzenError):
@@ -98,19 +104,19 @@ def create_app(svc: Anzen | None = None) -> FastAPI:
         c = b.config
         cfg = EventConfig(bytes.fromhex(c.organizer[2:]), bytes.fromhex(c.policyHash[2:]), c.issuer, c.amount,
                           c.capacity, c.commitDeadline, c.checkInStart, c.checkInEnd, c.noShow)
-        return svc.create_event(b.policy, cfg, b.qx, b.qy, b.deadline, b.r, b.s)
+        return svc.create_event(b.policy, cfg, b.qx, b.qy, b.deadline, b.auth)
 
     @app.post("/events/{event_id}/commit")
     def commit(event_id: int, b: WithDeadline):
-        return svc.commit(event_id, b.qx, b.qy, b.deadline, b.r, b.s)
+        return svc.commit(event_id, b.qx, b.qy, b.deadline, b.auth)
 
     @app.post("/events/{event_id}/cancel")
     def cancel(event_id: int, b: WithDeadline):
-        return svc.cancel(event_id, b.qx, b.qy, b.deadline, b.r, b.s)
+        return svc.cancel(event_id, b.qx, b.qy, b.deadline, b.auth)
 
     @app.post("/events/{event_id}/desk")
     def desk(event_id: int, b: WithDeadline):
-        return svc.open_desk(event_id, b.qx, b.qy, b.deadline, b.r, b.s)
+        return svc.open_desk(event_id, b.qx, b.qy, b.deadline, b.auth)
 
     @app.get("/events/{event_id}/challenge")
     def challenge(event_id: int, token: str):
@@ -118,15 +124,19 @@ def create_app(svc: Anzen | None = None) -> FastAPI:
 
     @app.post("/events/{event_id}/checkin")
     def check_in(event_id: int, b: CheckIn):
-        return svc.check_in(event_id, b.qx, b.qy, b.challenge, b.expiresAt, b.issuerSig, b.r, b.s)
+        return svc.check_in(event_id, b.qx, b.qy, b.challenge, b.expiresAt, b.issuerSig, b.auth)
 
     @app.post("/delegate")
     def delegate(b: Delegate):
-        return svc.delegate(b.agent, b.cap, b.expiry, b.qx, b.qy, b.deadline, b.r, b.s)
+        return svc.delegate(b.agent, b.agentId, b.cap, b.expiry, b.qx, b.qy, b.deadline, b.auth)
 
     @app.get("/agents/{agent}")
-    def agent(agent: str):
-        return svc.agent_info(agent)
+    def agent(agent: str, agentId: int | None = None):
+        return svc.agent_info(agent, agentId)
+
+    @app.post("/agents/{agent}/gas")
+    def agent_gas(agent: str):
+        return svc.agent_gas(agent)
 
     @app.post("/events/{event_id}/agent-commit")
     def agent_commit(event_id: int, b: AgentCommit):
@@ -156,13 +166,17 @@ def create_app(svc: Anzen | None = None) -> FastAPI:
     def tx(tx: str):
         return svc.tx(tx)
 
+    # The web app (web/) on the same origin: passkeys are bound to this domain, and no CORS is involved.
+    web = Path(__file__).resolve().parents[2] / "web"
+    if web.is_dir():
+        app.mount("/", StaticFiles(directory=web, html=True), name="web")
     return app
 
 
 def main() -> None:
     import uvicorn
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    uvicorn.run(create_app(), host=os.environ.get("ANZEN_HOST", "0.0.0.0"), port=int(os.environ.get("ANZEN_PORT", "8790")))
+    uvicorn.run(create_app(), host=os.environ.get("ANZEN_HOST", "0.0.0.0"), port=int(os.environ.get("PORT") or os.environ.get("ANZEN_PORT", "8790")))
 
 
 if __name__ == "__main__":

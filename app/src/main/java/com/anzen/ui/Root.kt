@@ -231,12 +231,14 @@ private fun AnzenNavHost(nav: NavHostController, start: String, vm: AppViewModel
             ProofScreen(it.arguments!!.getLong("id"), it.arguments!!.getString("key")!!, vm, back)
         }
         composable("activity") { ActivityScreen(vm, back, go) }
-        composable("agent?agent={agent}&cap={cap}&days={days}", listOf(
+        composable("agent?agent={agent}&cap={cap}&days={days}&id={id}", listOf(
+            navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null },
             navArgument("agent") { type = NavType.StringType; nullable = true; defaultValue = null },
             navArgument("cap") { type = NavType.StringType; nullable = true; defaultValue = null },
             navArgument("days") { type = NavType.StringType; nullable = true; defaultValue = null })) {
             val a = it.arguments
-            AgentScreen(a?.getString("agent"), a?.getString("cap")?.toLongOrNull(), a?.getString("days")?.toIntOrNull(), vm, back)
+            AgentScreen(a?.getString("agent"), a?.getString("cap")?.toLongOrNull(), a?.getString("days")?.toIntOrNull(),
+                a?.getString("id")?.toLongOrNull(), vm, back)
         }
     }
 }

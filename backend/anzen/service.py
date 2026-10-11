@@ -22,6 +22,7 @@ log = logging.getLogger("anzen")
 
 CHALLENGE_TTL = 45  # seconds a venue code stays valid
 MAX_SIGNATURE_WINDOW = 15 * 60
+AGENT_GAS_WEI = 30 * 10**15  # 0.03 MON: enough for one ERC-8004 registration on Monad testnet
 NO_SHOW = {0: "organizer", 1: "split"}
 STATUS = {0: "none", 1: "committed", 2: "checked_in", 3: "settled"}
 
@@ -31,6 +32,17 @@ POLICY_TEXT = {"title": (1, 80), "description": (0, 2000), "creator": (1, 60), "
 
 def _hex(b: bytes) -> str:
     return "0x" + b.hex()
+
+
+def _auth(h: str) -> bytes:
+    """An account authorization: 64-byte raw P-256 (r ‖ s) or an abi-encoded WebAuthn assertion."""
+    try:
+        b = bytes.fromhex(h.removeprefix("0x"))
+    except ValueError:
+        raise AnzenError(Reason.INVALID_SIGNATURE, "malformed hex") from None
+    if not 64 <= len(b) <= 4096:
+        raise AnzenError(Reason.INVALID_SIGNATURE, "bad authorization length")
+    return b
 
 
 def _bytes(h: str, n: int = 32) -> bytes:
@@ -44,8 +56,9 @@ def _bytes(h: str, n: int = 32) -> bytes:
 
 
 class Anzen:
-    def __init__(self, db: sqlite3.Connection, chain: Chain, *, faucet_amount: int = 100_000_000):
-        self.db, self.chain, self.faucet_amount = db, chain, faucet_amount
+    def __init__(self, db: sqlite3.Connection, chain: Chain, *, faucet_amount: int = 100_000_000,
+                 public_rpc: str | None = None):
+        self.db, self.chain, self.faucet_amount, self.public_rpc = db, chain, faucet_amount, public_rpc
 
     # ---------------------------------------------------------------- reads
 
@@ -57,6 +70,7 @@ class Anzen:
                 "issuer": self.chain.issuer.address, "relayer": self.chain.relayer.address,
                 "relayerFunded": self.chain.relayer_balance() > 0, "faucet": cid not in MAINNETS,
                 "asset": {"symbol": "tUSD", "decimals": 6, "label": "Test dollar, no value"},
+                "erc8004": dict(zip(["identity", "reputation"], self.chain.registries)),
                 "now": self.chain.now()}
 
     def events(self, query: str = "", key_id: str | None = None) -> list[dict]:
@@ -112,7 +126,8 @@ class Anzen:
     def _participation(self, event_id: int, key_id: bytes) -> dict:
         p = self.chain.participation(event_id, key_id)
         return {"status": STATUS[p["status"]], "attended": p["attended"], "checkedInAt": p["checked_in_at"],
-                "settledAmount": p["settled_amount"], "passportId": p["passport_id"]}
+                "settledAmount": p["settled_amount"], "passportId": p["passport_id"],
+                "agentId": p["agent_ref"] - 1 if p["agent_ref"] else None}
 
     def account(self, key_id: str) -> dict:
         kid = _bytes(key_id)
@@ -120,6 +135,8 @@ class Anzen:
         events = self.events(key_id=key_id)
         d = self.chain.delegation(kid)
         active = d["agent"] != "0x0000000000000000000000000000000000000000" and d["expiry"] > self.chain.now()
+        d["agentId"] = d.pop("agent_ref") - 1 if d["agent_ref"] else None
+        d["reputation"] = self.chain.show_up(d["agentId"]) if d["agentId"] is not None else None
         return {
             "keyId": key_id, "balance": self.chain.balance(kid), "nonce": self.chain.nonce(kid),
             "delegation": {**d, "active": active, "remaining": max(d["cap"] - d["spent"], 0) if active else 0},
@@ -191,42 +208,59 @@ class Anzen:
     # ---------------------------------------------------------------- relayed actions
 
     def create_event(self, policy: str, cfg: messages.EventConfig, qx: str, qy: str, deadline: int,
-                     r: str, s: str) -> dict:
+                     auth: str) -> dict:
         doc = self._validate_policy(policy, cfg)
         call = self.chain.treasury.functions.createEvent(cfg.as_tuple(), _bytes(qx), _bytes(qy), deadline,
-                                                         _bytes(r), _bytes(s))
-        tx = self._relay("create", f"create|{r}|{s}", call, key_id=_hex(cfg.organizer), payload=policy)
+                                                         _auth(auth))
+        tx = self._relay("create", f"create|{auth}", call, key_id=_hex(cfg.organizer), payload=policy)
         log.info(json.dumps({"stage": "create", "tx": tx, "title": doc["title"]}))
         return {"tx": tx}
 
-    def commit(self, event_id: int, qx: str, qy: str, deadline: int, r: str, s: str) -> dict:
-        call = self.chain.treasury.functions.commit(event_id, _bytes(qx), _bytes(qy), deadline, _bytes(r), _bytes(s))
-        return {"tx": self._relay("commit", f"commit|{event_id}|{r}|{s}", call, event_id,
+    def commit(self, event_id: int, qx: str, qy: str, deadline: int, auth: str) -> dict:
+        call = self.chain.treasury.functions.commit(event_id, _bytes(qx), _bytes(qy), deadline, _auth(auth))
+        return {"tx": self._relay("commit", f"commit|{event_id}|{auth}", call, event_id,
                                   _hex(messages.key_id(_bytes(qx), _bytes(qy))))}
 
-    def cancel(self, event_id: int, qx: str, qy: str, deadline: int, r: str, s: str) -> dict:
-        call = self.chain.treasury.functions.cancelEvent(event_id, _bytes(qx), _bytes(qy), deadline, _bytes(r),
-                                                         _bytes(s))
-        return {"tx": self._relay("cancel", f"cancel|{event_id}|{r}|{s}", call, event_id,
+    def cancel(self, event_id: int, qx: str, qy: str, deadline: int, auth: str) -> dict:
+        call = self.chain.treasury.functions.cancelEvent(event_id, _bytes(qx), _bytes(qy), deadline, _auth(auth))
+        return {"tx": self._relay("cancel", f"cancel|{event_id}|{auth}", call, event_id,
                                   _hex(messages.key_id(_bytes(qx), _bytes(qy))))}
 
     def check_in(self, event_id: int, qx: str, qy: str, challenge: str, expires_at: int, issuer_sig: str,
-                 r: str, s: str) -> dict:
+                 auth: str) -> dict:
         call = self.chain.treasury.functions.checkIn(event_id, _bytes(qx), _bytes(qy), _bytes(challenge), expires_at,
-                                                     _bytes(issuer_sig, 65), _bytes(r), _bytes(s))
-        return {"tx": self._relay("checkin", f"checkin|{event_id}|{r}|{s}", call, event_id,
+                                                     _bytes(issuer_sig, 65), _auth(auth))
+        return {"tx": self._relay("checkin", f"checkin|{event_id}|{auth}", call, event_id,
                                   _hex(messages.key_id(_bytes(qx), _bytes(qy))))}
 
-    def delegate(self, agent: str, cap: int, expiry: int, qx: str, qy: str, deadline: int, r: str, s: str) -> dict:
+    def delegate(self, agent: str, agent_id: int, cap: int, expiry: int, qx: str, qy: str, deadline: int,
+                 auth: str) -> dict:
         x, y = _bytes(qx), _bytes(qy)
-        call = self.chain.treasury.functions.delegate(x, y, Web3.to_checksum_address(agent), cap, expiry, deadline,
-                                                      _bytes(r), _bytes(s))
-        return {"tx": self._relay("delegate", f"delegate|{r}|{s}", call, key_id=_hex(messages.key_id(x, y)))}
+        call = self.chain.treasury.functions.delegate(x, y, Web3.to_checksum_address(agent), agent_id, cap, expiry,
+                                                      deadline, _auth(auth))
+        return {"tx": self._relay("delegate", f"delegate|{auth}", call, key_id=_hex(messages.key_id(x, y)))}
 
-    def agent_info(self, agent: str) -> dict:
-        """What an agent needs to sign its next commit."""
+    def agent_info(self, agent: str, agent_id: int | None = None) -> dict:
+        """What an agent needs to sign its next commit, and (with its ERC-8004 id) its show-up reputation."""
+        ident, rep = self.chain.registries
         return {"agent": Web3.to_checksum_address(agent), "nonce": self.chain.agent_nonce(agent),
-                "chainId": self.chain.chain_id, "treasury": self.chain.treasury.address, "now": self.chain.now()}
+                "chainId": self.chain.chain_id, "treasury": self.chain.treasury.address, "now": self.chain.now(),
+                "rpc": self.public_rpc, "identityRegistry": ident, "reputationRegistry": rep,
+                "reputation": self.chain.show_up(agent_id) if agent_id is not None else None}
+
+    def agent_gas(self, agent: str) -> dict:
+        """Testnet only: a little MON so a new agent can register its own ERC-8004 identity. Once per agent."""
+        if self.chain.chain_id in MAINNETS:
+            raise AnzenError(Reason.FAUCET_DISABLED)
+        addr = Web3.to_checksum_address(agent)
+        try:
+            with self.db:
+                self.db.execute("INSERT INTO faucet(key_id, created_at) VALUES (?,?)", ("gas:" + addr.lower(), time.time()))
+        except sqlite3.IntegrityError:
+            raise AnzenError(Reason.FAUCET_USED) from None
+        tx = self.chain.send_value(addr, AGENT_GAS_WEI)
+        self.chain.wait(tx)
+        return {"tx": tx, "amount": AGENT_GAS_WEI}
 
     def commit_by_agent(self, event_id: int, key_id: str, deadline: int, agent_sig: str) -> dict:
         call = self.chain.treasury.functions.commitByAgent(event_id, _bytes(key_id), deadline, _bytes(agent_sig, 65))
@@ -285,7 +319,7 @@ class Anzen:
 
     # ---------------------------------------------------------------- check-in desk
 
-    def open_desk(self, event_id: int, qx: str, qy: str, deadline: int, r: str, s: str) -> dict:
+    def open_desk(self, event_id: int, qx: str, qy: str, deadline: int, auth: str) -> dict:
         if deadline < self.chain.now() or deadline > self.chain.now() + MAX_SIGNATURE_WINDOW:
             raise AnzenError(Reason.EXPIRED)
         e = self.event(event_id)
@@ -293,7 +327,7 @@ class Anzen:
         if _hex(messages.key_id(x, y)) != e["organizer"]:
             raise AnzenError(Reason.NOT_ORGANIZER)
         msg = messages.desk(self.chain.chain_id, self.chain.treasury.address, event_id, deadline)
-        if not p256.verify(x, y, _bytes(r), _bytes(s), msg):
+        if not p256.verify(x, y, _auth(auth), msg):
             raise AnzenError(Reason.INVALID_SIGNATURE)
         token = secrets.token_urlsafe(24)
         with self.db:

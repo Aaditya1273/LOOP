@@ -30,6 +30,16 @@ def step(label: str, tx: str) -> dict:
     return r
 
 
+def register_agent(agent, h) -> int:
+    """The agent mints its own ERC-8004 identity (testnet gas from the service), as `anzen.agent init` does."""
+    if not h["erc8004"]["identity"]:
+        return messages.NO_AGENT_ID
+    from . import agent as cli
+    aid = cli.register_identity(agent)
+    print(f"  ✓ agent registered ERC-8004 identity     #{aid} in {h['erc8004']['identity']}")
+    return aid
+
+
 def until(t: int) -> None:
     while (now := http("GET", "/health")["now"]) < t:
         print(f"  … waiting {t - now} s for chain time", flush=True)
@@ -66,9 +76,11 @@ def main() -> None:
     step("alice commits 5 tUSD (her key)", http("POST", f"/events/{eid}/commit", {"deadline": now + 600, **sig})["tx"])
 
     # bob delegates a 10 tUSD budget to his agent; the agent commits for him
-    sig = sign(bob, messages.delegate(h["chainId"], h["treasury"], agent.address, 10_000_000, now + 86_400, 0, now + 600))
-    step("bob approves agent budget 10 tUSD", http("POST", "/delegate", {"agent": agent.address, "cap": 10_000_000,
-                                                                          "expiry": now + 86_400, "deadline": now + 600, **sig})["tx"])
+    agent_id = register_agent(agent, h)
+    sig = sign(bob, messages.delegate(h["chainId"], h["treasury"], agent.address, agent_id, 10_000_000, now + 86_400, 0, now + 600))
+    step("bob approves agent budget 10 tUSD", http("POST", "/delegate", {"agent": agent.address, "agentId": agent_id,
+                                                                          "cap": 10_000_000, "expiry": now + 86_400,
+                                                                          "deadline": now + 600, **sig})["tx"])
     info = http("GET", f"/agents/{agent.address}")
     digest = messages.agent_commit_hash(h["chainId"], h["treasury"], eid, bytes.fromhex(b_id[2:]), 5_000_000, info["nonce"], info["now"] + 600)
     asig = "0x" + Account.sign_message(encode_defunct(primitive=digest), agent.key).signature.hex().removeprefix("0x")
@@ -87,7 +99,11 @@ def main() -> None:
     step("alice's outcome applied", http("POST", f"/events/{eid}/settle", {"keyId": a_id})["tx"])
     step("bob's outcome applied (no-show)", http("POST", f"/events/{eid}/settle", {"keyId": b_id})["tx"])
 
-    a, b = http("GET", f"/accounts/{a_id}"), http("GET", f"/accounts/{b_id}")
+    if agent_id != messages.NO_AGENT_ID:
+        rep = http("GET", f"/agents/{agent.address}?agentId={agent_id}")["reputation"]
+        print(f"  ✓ ERC-8004 agent #{agent_id} show-up reputation (client = treasury): {rep}")
+        assert rep["count"] == 1 and rep["showUpRate"] == 0  # bob's agent booked; bob didn't come
+        a, b = http("GET", f"/accounts/{a_id}"), http("GET", f"/accounts/{b_id}")
     me = a["commitments"][0]["me"]
     assert a["balance"] == 105_000_000 and me["passportId"] > 0 and b["balance"] == 95_000_000, (a, b)
     print(f"\nalice: 105 tUSD (5 back + bob's 5), passport no. {me['passportId']}. bob: 95 tUSD (no-show).")

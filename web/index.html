@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Shonko · ANZEN</title>
+  <meta name="description" content="Your agent can book it. Only you can show up. Refundable event commitments with passkeys, on Monad.">
+  <meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111318" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 108 108'%3E%3Crect width='108' height='108' rx='24' fill='%23111318'/%3E%3Cpath d='M73.204,50.614 A19.5,19.5 0 1,1 57.386,34.796' stroke='%23F6F3EC' stroke-width='6.76' stroke-linecap='round' fill='none'/%3E%3Ccircle cx='67.789' cy='40.211' r='7.8' fill='%23D3F36B'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <!-- API = this origin (the service serves this page). Local dev: ?api=http://localhost:8790 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js" defer></script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header>
+    <a href="#/" class="brand"><span class="mark"></span>Shonko</a>
+    <span id="net"></span>
+    <a href="#/account" class="me" aria-label="Account">Account</a>
+  </header>
+  <main id="view"><div class="loading"><span class="spin"></span> Loading</div></main>
+  <footer>ANZEN · refundable commitments, passkeys and ERC-8004 show-up reputation on Monad ·
+    <a href="https://github.com/Aaditya1273/LOOP" target="_blank" rel="noopener">source</a></footer>
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

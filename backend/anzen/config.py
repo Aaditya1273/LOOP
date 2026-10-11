@@ -25,6 +25,7 @@ class Settings:
     issuer_key: str
     db_path: str
     faucet_amount: int  # base units (6 decimals)
+    public_rpc: str  # handed to agents so they can register their ERC-8004 identity; must not embed an API key
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -39,6 +40,7 @@ class Settings:
             issuer_key=_required("ANZEN_ISSUER_KEY"),
             db_path=os.environ.get("ANZEN_DB", str(BACKEND_DIR / "anzen.db")),
             faucet_amount=int(os.environ.get("ANZEN_FAUCET_AMOUNT", "100000000")),  # 100 tUSD
+            public_rpc=os.environ.get("ANZEN_PUBLIC_RPC", os.environ["ANZEN_RPC_URL"]),
         )
 
 

@@ -62,6 +62,8 @@ class RulesTest {
         assertEquals("agent?agent=0x1c3c7d2915352282C0419F125580B288e58f6c17&cap=1000&days=30", // clamped
             Links.route("anzen://delegate?agent=0x1c3c7d2915352282C0419F125580B288e58f6c17&cap=99999&days=365"))
         assertNull(Links.route("anzen://delegate?agent=0xnothex&cap=20"))
+        assertEquals("agent?agent=0x1c3c7d2915352282C0419F125580B288e58f6c17&cap=20&days=7&id=2181",
+            Links.route("anzen://delegate?agent=0x1c3c7d2915352282C0419F125580B288e58f6c17&cap=20&days=7&id=2181"))
         assertNull(Links.route("anzen://wallet/drain"))
         assertNull(Links.route("javascript:alert(1)"))
     }

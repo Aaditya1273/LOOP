@@ -6,16 +6,42 @@ import {SafeERC20} from "openzeppelin-contracts/contracts/token/ERC20/utils/Safe
 import {P256} from "openzeppelin-contracts/contracts/utils/cryptography/P256.sol";
 import {ECDSA} from "openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
 import {MessageHashUtils} from "openzeppelin-contracts/contracts/utils/cryptography/MessageHashUtils.sol";
+import {WebAuthn} from "openzeppelin-contracts/contracts/utils/cryptography/WebAuthn.sol";
+
+/// ERC-8004 registries (the official deployments on Monad), only the functions ANZEN uses.
+interface IERC8004Identity {
+    function ownerOf(uint256 agentId) external view returns (address);
+    function getAgentWallet(uint256 agentId) external view returns (address);
+}
+
+interface IERC8004Reputation {
+    function giveFeedback(
+        uint256 agentId,
+        int128 value,
+        uint8 valueDecimals,
+        string calldata tag1,
+        string calldata tag2,
+        string calldata endpoint,
+        string calldata feedbackURI,
+        bytes32 feedbackHash
+    ) external;
+}
 
 /// @title ANZEN Presence Treasury
 /// @notice Event treasuries whose settlement depends on an event-specific check-in.
 ///
-/// Accounts are P-256 keys (a phone's Android Keystore key), identified by keyId = sha256(qx ‖ qy).
-/// Every action that moves or commits a participant's funds carries that key's signature over
-/// sha256(abi.encode(TAG, chainid, this, ...params)); `P256.verify` uses Monad's P-256 precompile
-/// (0x0100) and falls back to a Solidity verifier where the precompile is absent.
-/// This verifies a raw P-256 signature. It does NOT verify a WebAuthn assertion (no rpId, origin or
-/// authenticator flags), and a signature never proves where its holder physically was.
+/// Accounts are P-256 keys, identified by keyId = sha256(qx ‖ qy): an Android Keystore key, or a WebAuthn
+/// passkey (Face ID, Touch ID, Windows Hello, security keys). Every action that moves or commits a
+/// participant's funds is authorized over d = sha256(abi.encode(TAG, chainid, this, ...params)), as either
+///   - a raw low-s P-256 signature of d (64 bytes: r ‖ s), or
+///   - a WebAuthn assertion whose challenge is d, with user verification required (abi-encoded WebAuthnAuth).
+/// Both paths use Monad's P-256 precompile (0x0100) through OpenZeppelin. A signature never proves where
+/// its holder physically was; the venue check-in adds an issuer-signed, 45-second code for that.
+///
+/// ERC-8004 show-up reputation: when an AI agent reserved a place (commitByAgent) and the outcome is
+/// applied, this contract itself posts feedback for the agent's ERC-8004 identity: 100 if the owner
+/// checked in, 0 if not. Its getSummary over [this contract] is the agent's show-up rate, and every data
+/// point is backed by a real commitment and a verified check-in, so it can't be farmed with Sybil reviewers.
 ///
 /// An owner may delegate a capped, expiring commit budget to an AI agent's EVM key (`delegate`). The agent can
 /// reserve places with the owner's funds inside that budget and nothing more; check-in, cancel and withdraw
@@ -64,6 +90,7 @@ contract AnzenTreasury {
         uint64 checkedInAt;
         uint128 settledAmount;
         uint64 passportId; // 0 = none
+        uint64 agentRef; // ERC-8004 agentId + 1 when an agent reserved this place; 0 = the owner did
     }
 
     bytes32 internal constant CREATE = "ANZEN/create/v1";
@@ -74,6 +101,9 @@ contract AnzenTreasury {
     bytes32 internal constant WITHDRAW = "ANZEN/withdraw/v1";
     bytes32 internal constant DELEGATE = "ANZEN/delegate/v1";
     bytes32 internal constant AGENT_COMMIT = "ANZEN/agentcommit/v1";
+    uint256 public constant NO_AGENT_ID = type(uint256).max;
+    /// Gas reserved for the ERC-8004 feedback call (~179k measured against the Monad registry on first use).
+    uint256 public constant REPUTATION_GAS = 250_000;
 
     /// A scoped budget an owner key grants to an AI agent's EOA: the agent may commit the owner's balance to
     /// events, up to `cap` in total, until `expiry`. It can do nothing else: no check-in, no withdraw, no cancel.
@@ -82,9 +112,12 @@ contract AnzenTreasury {
         uint128 cap;
         uint128 spent;
         uint64 expiry;
+        uint64 agentRef; // ERC-8004 agentId + 1; 0 = no registered identity
     }
 
     IERC20 public immutable asset;
+    IERC8004Identity public immutable identityRegistry; // zero where ERC-8004 isn't deployed
+    IERC8004Reputation public immutable reputationRegistry;
 
     uint256 public eventCount;
     uint64 public passportCount;
@@ -107,6 +140,7 @@ contract AnzenTreasury {
     event PassportIssued(uint256 indexed eventId, bytes32 indexed keyId, uint64 passportId);
     event Delegated(bytes32 indexed keyId, address indexed agent, uint128 cap, uint64 expiry);
     event AgentCommitted(uint256 indexed eventId, bytes32 indexed keyId, address indexed agent, uint256 amount);
+    event ShowUpReported(uint256 indexed agentId, uint256 indexed eventId, bytes32 indexed keyId, bool attended, bool posted);
 
     error InvalidConfig();
     error InvalidSignature();
@@ -121,9 +155,13 @@ contract AnzenTreasury {
     error AlreadySettled();
     error NotDelegated();
     error BudgetExceeded();
+    error AgentIdentityMismatch();
+    error InsufficientGasForReputation();
 
-    constructor(IERC20 asset_) {
+    constructor(IERC20 asset_, IERC8004Identity identity_, IERC8004Reputation reputation_) {
         asset = asset_;
+        identityRegistry = identity_;
+        reputationRegistry = reputation_;
     }
 
     // ---------------------------------------------------------------- views
@@ -149,11 +187,11 @@ contract AnzenTreasury {
         emit Deposited(keyId, msg.sender, amount);
     }
 
-    function withdraw(bytes32 qx, bytes32 qy, address to, uint256 amount, uint256 deadline, bytes32 r, bytes32 s)
+    function withdraw(bytes32 qx, bytes32 qy, address to, uint256 amount, uint256 deadline, bytes calldata auth)
         external
     {
         bytes32 keyId = keyIdOf(qx, qy);
-        _authorize(qx, qy, deadline, r, s, abi.encode(WITHDRAW, block.chainid, address(this), to, amount, nonces[keyId]++, deadline));
+        _authorize(qx, qy, deadline, auth, abi.encode(WITHDRAW, block.chainid, address(this), to, amount, nonces[keyId]++, deadline));
         if (balanceOf[keyId] < amount) revert InsufficientBalance();
         balanceOf[keyId] -= amount;
         asset.safeTransfer(to, amount);
@@ -162,7 +200,7 @@ contract AnzenTreasury {
 
     // ---------------------------------------------------------------- lifecycle
 
-    function createEvent(EventConfig calldata c, bytes32 qx, bytes32 qy, uint256 deadline, bytes32 r, bytes32 s)
+    function createEvent(EventConfig calldata c, bytes32 qx, bytes32 qy, uint256 deadline, bytes calldata auth)
         external
         returns (uint256 eventId)
     {
@@ -170,26 +208,41 @@ contract AnzenTreasury {
             c.organizer != keyIdOf(qx, qy) || c.amount == 0 || c.capacity == 0 || c.issuer == address(0)
                 || c.commitDeadline <= block.timestamp || c.commitDeadline > c.checkInStart || c.checkInStart >= c.checkInEnd
         ) revert InvalidConfig();
-        _authorize(qx, qy, deadline, r, s, abi.encode(CREATE, block.chainid, address(this), nonces[c.organizer]++, deadline, c));
+        _authorize(qx, qy, deadline, auth, abi.encode(CREATE, block.chainid, address(this), nonces[c.organizer]++, deadline, c));
         eventId = ++eventCount;
         _config[eventId] = c;
         emit EventCreated(eventId, c.organizer, c.policyHash);
     }
 
-    function commit(uint256 eventId, bytes32 qx, bytes32 qy, uint256 deadline, bytes32 r, bytes32 s) external {
+    function commit(uint256 eventId, bytes32 qx, bytes32 qy, uint256 deadline, bytes calldata auth) external {
         EventConfig storage c = _existing(eventId);
         bytes32 keyId = keyIdOf(qx, qy);
-        _authorize(qx, qy, deadline, r, s, abi.encode(COMMIT, block.chainid, address(this), eventId, c.amount, nonces[keyId]++, deadline));
+        _authorize(qx, qy, deadline, auth, abi.encode(COMMIT, block.chainid, address(this), eventId, c.amount, nonces[keyId]++, deadline));
         _commit(eventId, keyId);
     }
 
     /// @notice Owner grants (or replaces/revokes with cap 0) an agent's scoped budget. Signed by the owner's key.
-    function delegate(bytes32 qx, bytes32 qy, address agent, uint128 cap, uint64 expiry, uint256 deadline, bytes32 r, bytes32 s)
-        external
-    {
+    /// @param agentId the agent's ERC-8004 identity (its registered wallet must be `agent`), or NO_AGENT_ID
+    function delegate(
+        bytes32 qx,
+        bytes32 qy,
+        address agent,
+        uint256 agentId,
+        uint128 cap,
+        uint64 expiry,
+        uint256 deadline,
+        bytes calldata auth
+    ) external {
         bytes32 keyId = keyIdOf(qx, qy);
-        _authorize(qx, qy, deadline, r, s, abi.encode(DELEGATE, block.chainid, address(this), agent, cap, expiry, nonces[keyId]++, deadline));
-        delegationOf[keyId] = Delegation(agent, cap, 0, expiry);
+        _authorize(qx, qy, deadline, auth, abi.encode(DELEGATE, block.chainid, address(this), agent, agentId, cap, expiry, nonces[keyId]++, deadline));
+        uint64 ref;
+        if (agentId != NO_AGENT_ID && address(identityRegistry) != address(0)) {
+            if (identityRegistry.getAgentWallet(agentId) != agent && identityRegistry.ownerOf(agentId) != agent) {
+                revert AgentIdentityMismatch();
+            }
+            ref = uint64(agentId) + 1;
+        }
+        delegationOf[keyId] = Delegation(agent, cap, 0, expiry, ref);
         emit Delegated(keyId, agent, cap, expiry);
     }
 
@@ -206,6 +259,7 @@ contract AnzenTreasury {
         if (d.spent + c.amount > d.cap) revert BudgetExceeded();
         d.spent += c.amount;
         _commit(eventId, keyId);
+        _participation[eventId][keyId].agentRef = d.agentRef;
         emit AgentCommitted(eventId, keyId, d.agent, c.amount);
     }
 
@@ -232,8 +286,7 @@ contract AnzenTreasury {
         bytes32 challenge,
         uint64 expiresAt,
         bytes calldata issuerSig,
-        bytes32 r,
-        bytes32 s
+        bytes calldata auth
     ) external {
         EventConfig storage c = _existing(eventId);
         EventState storage st = _state[eventId];
@@ -242,7 +295,7 @@ contract AnzenTreasury {
         bytes32 issued = keccak256(abi.encode(CHALLENGE, block.chainid, address(this), eventId, challenge, expiresAt));
         if (ECDSA.recover(MessageHashUtils.toEthSignedMessageHash(issued), issuerSig) != c.issuer) revert InvalidSignature();
         bytes32 h = sha256(abi.encode(CHECKIN, block.chainid, address(this), eventId, challenge, expiresAt));
-        if (!P256.verify(h, r, s, qx, qy)) revert InvalidSignature();
+        if (!_verifyKey(qx, qy, h, auth)) revert InvalidSignature();
 
         bytes32 keyId = keyIdOf(qx, qy);
         Participation storage p = _participation[eventId][keyId];
@@ -255,10 +308,10 @@ contract AnzenTreasury {
     }
 
     /// @notice Organizer cancels before check-in opens; every participant can then be refunded in full.
-    function cancelEvent(uint256 eventId, bytes32 qx, bytes32 qy, uint256 deadline, bytes32 r, bytes32 s) external {
+    function cancelEvent(uint256 eventId, bytes32 qx, bytes32 qy, uint256 deadline, bytes calldata auth) external {
         EventConfig storage c = _existing(eventId);
         if (keyIdOf(qx, qy) != c.organizer) revert NotOrganizer();
-        _authorize(qx, qy, deadline, r, s, abi.encode(CANCEL, block.chainid, address(this), eventId, nonces[c.organizer]++, deadline));
+        _authorize(qx, qy, deadline, auth, abi.encode(CANCEL, block.chainid, address(this), eventId, nonces[c.organizer]++, deadline));
         EventState storage st = _state[eventId];
         if (st.cancelled || block.timestamp >= c.checkInStart) revert WrongPhase();
         st.cancelled = true;
@@ -303,6 +356,30 @@ contract AnzenTreasury {
             p.passportId = ++passportCount;
             emit PassportIssued(eventId, keyId, p.passportId);
         }
+        if (p.agentRef != 0 && !st.cancelled) _reportShowUp(eventId, keyId, p.agentRef - 1, p.attended);
+    }
+
+    /// @dev A registry failure never blocks settlement (the data point just isn't posted); too little gas does.
+    function _reportShowUp(uint256 eventId, bytes32 keyId, uint256 agentId, bool attended) internal {
+        bool posted;
+        if (address(reputationRegistry) != address(0)) {
+            // Without this, a gas estimate can settle on the amount where feedback runs out of gas and is
+            // silently caught. Requiring the full budget up front makes "too little gas" revert instead.
+            if (gasleft() < REPUTATION_GAS + 10_000) revert InsufficientGasForReputation();
+            try reputationRegistry.giveFeedback{gas: REPUTATION_GAS}(
+                agentId,
+                attended ? int128(100) : int128(0),
+                0,
+                "showUp",
+                "anzen",
+                "",
+                "",
+                keccak256(abi.encode(block.chainid, address(this), eventId, keyId))
+            ) {
+                posted = true;
+            } catch {}
+        }
+        emit ShowUpReported(agentId, eventId, keyId, attended, posted);
     }
 
     // ---------------------------------------------------------------- internals
@@ -312,11 +389,18 @@ contract AnzenTreasury {
         if (c.organizer == bytes32(0)) revert UnknownEvent();
     }
 
-    function _authorize(bytes32 qx, bytes32 qy, uint256 deadline, bytes32 r, bytes32 s, bytes memory message)
+    function _authorize(bytes32 qx, bytes32 qy, uint256 deadline, bytes calldata auth, bytes memory message)
         internal
         view
     {
         if (block.timestamp > deadline) revert Expired();
-        if (!P256.verify(sha256(message), r, s, qx, qy)) revert InvalidSignature();
+        if (!_verifyKey(qx, qy, sha256(message), auth)) revert InvalidSignature();
+    }
+
+    /// @dev 64 bytes: raw low-s P-256 (r ‖ s) over `digest`. Otherwise: a WebAuthn assertion over challenge
+    /// `digest`, requiring user presence and user verification (biometric or device PIN).
+    function _verifyKey(bytes32 qx, bytes32 qy, bytes32 digest, bytes calldata auth) internal view returns (bool) {
+        if (auth.length == 64) return P256.verify(digest, bytes32(auth[0:32]), bytes32(auth[32:64]), qx, qy);
+        return WebAuthn.verify(abi.encodePacked(digest), abi.decode(auth, (WebAuthn.WebAuthnAuth)), qx, qy, true);
     }
 }

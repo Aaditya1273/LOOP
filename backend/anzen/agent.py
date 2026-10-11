@@ -1,8 +1,9 @@
 """ANZEN agent client: what an AI agent (OpenClaw skill, or anything with a shell) uses to reserve event places
 for its owner inside the budget the owner signed on their phone.
 
-  python -m anzen.agent init                  create this agent's key, print its address and an approval link
+  python -m anzen.agent init                  create this agent's key and ERC-8004 identity; print an approval link
   python -m anzen.agent budget                the owner's remaining budget for this agent
+  python -m anzen.agent reputation            this agent's show-up rate, as reported by the ANZEN treasury
   python -m anzen.agent events [query]        open events (id, title, when, price, seats left)
   python -m anzen.agent reserve <event_id>    commit the owner's funds to one event (within budget)
 
@@ -70,15 +71,65 @@ def owner() -> str:
     return o
 
 
+IDFILE = KEYFILE.with_suffix(".id")
+AGENT_CARD = {"type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1", "name": "ANZEN event agent",
+              "description": "Finds creator events and reserves places for its owner within a budget the owner "
+                             "signed. Cannot check in: presence is the owner's.",
+              "services": [{"name": "anzen", "endpoint": BASE}]}
+
+
+def agent_id() -> int | None:
+    return int(IDFILE.read_text()) if IDFILE.exists() else None
+
+
+def register_identity(a) -> int | None:
+    """Mints this agent's ERC-8004 identity in the official registry (its own transaction, its own key)."""
+    from web3 import Web3
+    info = http("GET", f"/agents/{a.address}")
+    if not info.get("identityRegistry"):
+        return None  # no ERC-8004 on this network
+    w3 = Web3(Web3.HTTPProvider(info["rpc"]))
+    if w3.eth.get_balance(a.address) == 0:
+        http("POST", f"/agents/{a.address}/gas")  # testnet drip, once per agent
+    abi = [{"name": "register", "type": "function", "stateMutability": "nonpayable", "inputs": [{"type": "string"}],
+            "outputs": [{"type": "uint256"}]},
+           {"name": "Registered", "type": "event", "anonymous": False, "inputs": [
+               {"name": "agentId", "type": "uint256", "indexed": True}, {"name": "agentURI", "type": "string", "indexed": False},
+               {"name": "owner", "type": "address", "indexed": True}]}]
+    reg = w3.eth.contract(address=info["identityRegistry"], abi=abi)
+    import base64
+    uri = "data:application/json;base64," + base64.b64encode(json.dumps(AGENT_CARD).encode()).decode()
+    call = reg.functions.register(uri)
+    tx = call.build_transaction({"from": a.address, "nonce": w3.eth.get_transaction_count(a.address),
+                                 "gas": int(call.estimate_gas({"from": a.address}) * 1.3)})
+    receipt = w3.eth.wait_for_transaction_receipt(w3.eth.send_raw_transaction(a.sign_transaction(tx).raw_transaction))
+    from web3.logs import DISCARD
+    return reg.events.Registered().process_receipt(receipt, errors=DISCARD)[0]["args"]["agentId"]
+
+
 def cmd_init() -> None:
     if not KEYFILE.exists():
         KEYFILE.parent.mkdir(parents=True, exist_ok=True)
         KEYFILE.write_text(Account.create().key.hex())
         KEYFILE.chmod(0o600)
     a = agent()
-    link = f"anzen://delegate?agent={a.address}&cap={DEFAULT_CAP}&days=7"
-    out({"ok": True, "agent": a.address, "approvalLink": link},
-        f"agent {a.address}. Ask the owner to open this link on their phone and approve a budget: {link}")
+    if agent_id() is None and (aid := register_identity(a)) is not None:
+        IDFILE.write_text(str(aid))
+    aid = agent_id()
+    link = f"anzen://delegate?agent={a.address}&cap={DEFAULT_CAP}&days=7" + (f"&id={aid}" if aid is not None else "")
+    out({"ok": True, "agent": a.address, "erc8004AgentId": aid, "approvalLink": link},
+        f"agent {a.address}" + (f", ERC-8004 identity #{aid}" if aid is not None else "") +
+        f". Ask the owner to open this link on their phone and approve a budget: {link}")
+
+
+def cmd_reputation() -> None:
+    aid = agent_id()
+    info = http("GET", f"/agents/{agent().address}" + (f"?agentId={aid}" if aid is not None else ""))
+    rep = info.get("reputation") or {"count": 0, "showUpRate": None}
+    rate = rep["showUpRate"]
+    out({"ok": True, "erc8004AgentId": aid, **rep, "reportedBy": info["treasury"]},
+        f"show-up rate {rate:g}% over {rep['count']} reservations" if rate is not None
+        else "no settled reservations yet")
 
 
 def cmd_budget() -> None:
@@ -125,6 +176,7 @@ if __name__ == "__main__":
     match args[0]:
         case "init": cmd_init()
         case "budget": cmd_budget()
+        case "reputation": cmd_reputation()
         case "events": cmd_events(" ".join(args[1:]))
         case "reserve" if len(args) == 2 and args[1].isdigit(): cmd_reserve(int(args[1]))
         case _: print(__doc__)

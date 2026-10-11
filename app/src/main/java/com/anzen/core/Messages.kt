@@ -42,9 +42,12 @@ object Messages {
         tag("ANZEN/cancel/v1"), uint(chainId), address(treasury), uint(eventId), uint(nonce), uint(deadline),
     )
 
-    /** Grants (cap > 0) or revokes (agent 0x0, cap 0) the AI agent's commit budget. */
-    fun delegate(chainId: Long, treasury: String, agent: String, cap: Long, expiry: Long, nonce: Long, deadline: Long) = words(
-        tag("ANZEN/delegate/v1"), uint(chainId), address(treasury), address(agent), uint(cap), uint(expiry), uint(nonce), uint(deadline),
+    /** "No ERC-8004 identity": the agent isn't registered (its reservations then carry no reputation). */
+    val NO_AGENT_ID: BigInteger = BigInteger.ONE.shiftLeft(256) - BigInteger.ONE
+
+    /** Grants (cap > 0) or revokes (agent 0x0, cap 0) the AI agent's commit budget, bound to its ERC-8004 identity. */
+    fun delegate(chainId: Long, treasury: String, agent: String, agentId: BigInteger, cap: Long, expiry: Long, nonce: Long, deadline: Long) = words(
+        tag("ANZEN/delegate/v1"), uint(chainId), address(treasury), address(agent), uint(agentId), uint(cap), uint(expiry), uint(nonce), uint(deadline),
     )
 
     /** Offchain only: opens a check-in desk. The contract never accepts it. */
@@ -60,9 +63,11 @@ object Messages {
 
     internal fun tag(s: String): ByteArray = s.toByteArray(Charsets.US_ASCII).copyOf(32)
 
-    internal fun uint(v: Long): ByteArray {
-        require(v >= 0) { "uint must be non-negative" }
-        return leftPad(BigInteger.valueOf(v).toByteArray().dropWhile { it == 0.toByte() }.toByteArray())
+    internal fun uint(v: Long): ByteArray = uint(BigInteger.valueOf(v))
+
+    internal fun uint(v: BigInteger): ByteArray {
+        require(v.signum() >= 0 && v.bitLength() <= 256) { "uint256 out of range" }
+        return leftPad(v.toByteArray().dropWhile { it == 0.toByte() }.toByteArray())
     }
 
     internal fun address(hex: String): ByteArray {

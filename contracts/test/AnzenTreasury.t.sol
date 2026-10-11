@@ -6,6 +6,42 @@ import {AnzenTreasury} from "../src/AnzenTreasury.sol";
 import {TestDollar} from "../src/TestDollar.sol";
 import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {MessageHashUtils} from "openzeppelin-contracts/contracts/utils/cryptography/MessageHashUtils.sol";
+import {WebAuthn} from "openzeppelin-contracts/contracts/utils/cryptography/WebAuthn.sol";
+import {Base64} from "openzeppelin-contracts/contracts/utils/Base64.sol";
+import {IERC8004Identity, IERC8004Reputation} from "../src/AnzenTreasury.sol";
+
+/// Stand-in for the official ERC-8004 registries (third-party contracts deployed on Monad), reduced to what
+/// ANZEN calls. Same rules that matter: feedback is keyed by msg.sender (the client), self-feedback by the
+/// agent's owner is refused, getSummary averages over the clients you name. A fork test runs against the
+/// real registries on Monad testnet.
+contract Registry8004 is IERC8004Identity, IERC8004Reputation {
+    mapping(uint256 => address) public ownerOf;
+    mapping(uint256 => address) public getAgentWallet;
+    mapping(uint256 => mapping(address => int128[])) public feedback;
+    uint256 public lastId;
+
+    function register() external returns (uint256 id) {
+        id = lastId++;
+        ownerOf[id] = msg.sender;
+        getAgentWallet[id] = msg.sender;
+    }
+
+    function giveFeedback(uint256 agentId, int128 value, uint8, string calldata tag1, string calldata, string calldata,
+                          string calldata, bytes32) external {
+        require(ownerOf[agentId] != address(0), "no agent");
+        require(ownerOf[agentId] != msg.sender, "Self-feedback not allowed");
+        require(keccak256(bytes(tag1)) == keccak256("showUp"), "tag");
+        feedback[agentId][msg.sender].push(value);
+    }
+
+    function getSummary(uint256 agentId, address client) external view returns (uint256 count, int128 avg) {
+        int128[] storage f = feedback[agentId][client];
+        count = f.length;
+        int256 sum;
+        for (uint256 i; i < count; i++) sum += f[i];
+        if (count > 0) avg = int128(sum / int256(count));
+    }
+}
 
 /// Every signature here is a real P-256 signature (vm.signP256) verified by OpenZeppelin's P256 library:
 /// no mock verifier. forge's EVM has no P-256 precompile, so these runs exercise the Solidity fallback;
@@ -15,6 +51,7 @@ contract AnzenTreasuryTest is Test {
     uint128 constant AMOUNT = 10e6;
 
     AnzenTreasury t;
+    Registry8004 reg;
     TestDollar token;
     uint256 issuerPk = 0xA11CE;
     address issuer;
@@ -34,7 +71,8 @@ contract AnzenTreasuryTest is Test {
     function setUp() public {
         vm.warp(1_800_000_000);
         token = new TestDollar(address(this));
-        t = new AnzenTreasury(IERC20(address(token)));
+        reg = new Registry8004();
+        t = new AnzenTreasury(IERC20(address(token)), reg, reg);
         issuer = vm.addr(issuerPk);
         org = _key(0x0b1);
         alice = _key(0xa1);
@@ -65,9 +103,15 @@ contract AnzenTreasuryTest is Test {
         k = Key(pk, bytes32(x), bytes32(y), sha256(abi.encode(bytes32(x), bytes32(y))));
     }
 
-    function _sign(Key memory k, bytes memory message) internal pure returns (bytes32 r, bytes32 s) {
+    function _rs(Key memory k, bytes memory message) internal pure returns (bytes32 r, bytes32 s) {
         (r, s) = vm.signP256(k.pk, sha256(message));
         if (uint256(s) > N / 2) s = bytes32(N - uint256(s)); // low-s, as the app does
+    }
+
+    /// The Android path: a raw low-s P-256 signature, 64 bytes r ‖ s.
+    function _sign(Key memory k, bytes memory message) internal pure returns (bytes memory) {
+        (bytes32 r, bytes32 s) = _rs(k, message);
+        return abi.encodePacked(r, s);
     }
 
     function _config(AnzenTreasury.NoShow rule) internal view returns (AnzenTreasury.EventConfig memory) {
@@ -87,9 +131,9 @@ contract AnzenTreasuryTest is Test {
     function _create(AnzenTreasury.NoShow rule) internal returns (uint256) {
         AnzenTreasury.EventConfig memory c = _config(rule);
         uint256 deadline = _now() + 600;
-        (bytes32 r, bytes32 s) =
+        bytes memory sig =
             _sign(org, abi.encode(bytes32("ANZEN/create/v1"), block.chainid, address(t), t.nonces(org.id), deadline, c));
-        return t.createEvent(c, org.qx, org.qy, deadline, r, s);
+        return t.createEvent(c, org.qx, org.qy, deadline, sig);
     }
 
     function _commit(uint256 id, Key memory k) internal {
@@ -98,10 +142,10 @@ contract AnzenTreasuryTest is Test {
 
     function _commit(uint256 id, Key memory k, bytes4 err) internal {
         uint256 deadline = _now() + 600;
-        (bytes32 r, bytes32 s) =
+        bytes memory sig =
             _sign(k, abi.encode(bytes32("ANZEN/commit/v1"), block.chainid, address(t), id, AMOUNT, t.nonces(k.id), deadline));
         _expect(err);
-        t.commit(id, k.qx, k.qy, deadline, r, s);
+        t.commit(id, k.qx, k.qy, deadline, sig);
     }
 
     function _challenge(uint256 id, bytes32 challenge, uint64 exp, uint256 signer) internal view returns (bytes memory) {
@@ -113,10 +157,10 @@ contract AnzenTreasuryTest is Test {
     function _checkIn(uint256 id, Key memory k, bytes32 challenge, uint64 exp, bytes memory issuerSig, bytes4 err)
         internal
     {
-        (bytes32 r, bytes32 s) =
+        bytes memory sig =
             _sign(k, abi.encode(bytes32("ANZEN/checkin/v1"), block.chainid, address(t), id, challenge, exp));
         _expect(err);
-        t.checkIn(id, k.qx, k.qy, challenge, exp, issuerSig, r, s);
+        t.checkIn(id, k.qx, k.qy, challenge, exp, issuerSig, sig);
     }
 
     function _checkInNow(uint256 id, Key memory k) internal {
@@ -168,9 +212,9 @@ contract AnzenTreasuryTest is Test {
         uint256 id = _create(AnzenTreasury.NoShow.SplitAmongAttendees);
         _commit(id, alice);
         uint256 deadline = _now() + 600;
-        (bytes32 r, bytes32 s) =
+        bytes memory sig =
             _sign(org, abi.encode(bytes32("ANZEN/cancel/v1"), block.chainid, address(t), id, t.nonces(org.id), deadline));
-        t.cancelEvent(id, org.qx, org.qy, deadline, r, s);
+        t.cancelEvent(id, org.qx, org.qy, deadline, sig);
         t.settle(id, alice.id);
         assertEq(t.balanceOf(alice.id), 100e6);
         assertEq(t.participation(id, alice.id).passportId, 0);
@@ -179,10 +223,10 @@ contract AnzenTreasuryTest is Test {
     function test_withdraw() public {
         address to = address(0xBEEF);
         uint256 deadline = _now() + 600;
-        (bytes32 r, bytes32 s) = _sign(
+        bytes memory sig = _sign(
             alice, abi.encode(bytes32("ANZEN/withdraw/v1"), block.chainid, address(t), to, uint256(40e6), t.nonces(alice.id), deadline)
         );
-        t.withdraw(alice.qx, alice.qy, to, 40e6, deadline, r, s);
+        t.withdraw(alice.qx, alice.qy, to, 40e6, deadline, sig);
         assertEq(token.balanceOf(to), 40e6);
         assertEq(t.balanceOf(alice.id), 60e6);
     }
@@ -193,43 +237,43 @@ contract AnzenTreasuryTest is Test {
         uint256 id = _create(AnzenTreasury.NoShow.ToOrganizer);
         uint256 deadline = _now() + 600;
         // bob signs alice's commit
-        (bytes32 r, bytes32 s) = _sign(
+        bytes memory sig = _sign(
             bob, abi.encode(bytes32("ANZEN/commit/v1"), block.chainid, address(t), id, AMOUNT, t.nonces(alice.id), deadline)
         );
         vm.expectRevert(AnzenTreasury.InvalidSignature.selector);
-        t.commit(id, alice.qx, alice.qy, deadline, r, s);
+        t.commit(id, alice.qx, alice.qy, deadline, sig);
     }
 
     function test_highS_rejected() public {
         uint256 id = _create(AnzenTreasury.NoShow.ToOrganizer);
         uint256 deadline = _now() + 600;
-        (bytes32 r, bytes32 s) = _sign(
+        (bytes32 r, bytes32 s) = _rs(
             alice, abi.encode(bytes32("ANZEN/commit/v1"), block.chainid, address(t), id, AMOUNT, t.nonces(alice.id), deadline)
         );
         vm.expectRevert(AnzenTreasury.InvalidSignature.selector);
-        t.commit(id, alice.qx, alice.qy, deadline, r, bytes32(N - uint256(s)));
+        t.commit(id, alice.qx, alice.qy, deadline, abi.encodePacked(r, bytes32(N - uint256(s))));
     }
 
     function test_commitReplay_rejected() public {
         uint256 id = _create(AnzenTreasury.NoShow.ToOrganizer);
         uint256 deadline = _now() + 600;
-        (bytes32 r, bytes32 s) = _sign(
+        bytes memory sig = _sign(
             alice, abi.encode(bytes32("ANZEN/commit/v1"), block.chainid, address(t), id, AMOUNT, t.nonces(alice.id), deadline)
         );
-        t.commit(id, alice.qx, alice.qy, deadline, r, s);
+        t.commit(id, alice.qx, alice.qy, deadline, sig);
         vm.expectRevert(AnzenTreasury.InvalidSignature.selector); // nonce moved on
-        t.commit(id, alice.qx, alice.qy, deadline, r, s);
+        t.commit(id, alice.qx, alice.qy, deadline, sig);
     }
 
     function test_expiredAuthorization_rejected() public {
         uint256 id = _create(AnzenTreasury.NoShow.ToOrganizer);
         uint256 deadline = _now() + 600;
-        (bytes32 r, bytes32 s) = _sign(
+        bytes memory sig = _sign(
             alice, abi.encode(bytes32("ANZEN/commit/v1"), block.chainid, address(t), id, AMOUNT, t.nonces(alice.id), deadline)
         );
         vm.warp(deadline + 1);
         vm.expectRevert(AnzenTreasury.Expired.selector);
-        t.commit(id, alice.qx, alice.qy, deadline, r, s);
+        t.commit(id, alice.qx, alice.qy, deadline, sig);
     }
 
     function test_capacityAndBalance() public {
@@ -317,49 +361,49 @@ contract AnzenTreasuryTest is Test {
     function test_cancel_onlyOrganizer_beforeCheckIn() public {
         uint256 id = _create(AnzenTreasury.NoShow.ToOrganizer);
         uint256 deadline = _now() + 600;
-        (bytes32 r, bytes32 s) =
+        bytes memory sig =
             _sign(alice, abi.encode(bytes32("ANZEN/cancel/v1"), block.chainid, address(t), id, t.nonces(alice.id), deadline));
         vm.expectRevert(AnzenTreasury.NotOrganizer.selector);
-        t.cancelEvent(id, alice.qx, alice.qy, deadline, r, s);
+        t.cancelEvent(id, alice.qx, alice.qy, deadline, sig);
 
         vm.warp(_now() + 2 days);
         deadline = _now() + 600;
-        (r, s) = _sign(org, abi.encode(bytes32("ANZEN/cancel/v1"), block.chainid, address(t), id, t.nonces(org.id), deadline));
+        sig = _sign(org, abi.encode(bytes32("ANZEN/cancel/v1"), block.chainid, address(t), id, t.nonces(org.id), deadline));
         vm.expectRevert(AnzenTreasury.WrongPhase.selector);
-        t.cancelEvent(id, org.qx, org.qy, deadline, r, s);
+        t.cancelEvent(id, org.qx, org.qy, deadline, sig);
     }
 
     function test_invalidConfig_rejected() public {
         AnzenTreasury.EventConfig memory c = _config(AnzenTreasury.NoShow.ToOrganizer);
         c.checkInEnd = c.checkInStart; // empty window
         uint256 deadline = _now() + 600;
-        (bytes32 r, bytes32 s) =
+        bytes memory sig =
             _sign(org, abi.encode(bytes32("ANZEN/create/v1"), block.chainid, address(t), t.nonces(org.id), deadline, c));
         vm.expectRevert(AnzenTreasury.InvalidConfig.selector);
-        t.createEvent(c, org.qx, org.qy, deadline, r, s);
+        t.createEvent(c, org.qx, org.qy, deadline, sig);
 
         c = _config(AnzenTreasury.NoShow.ToOrganizer);
         c.organizer = alice.id; // someone else's key
         vm.expectRevert(AnzenTreasury.InvalidConfig.selector);
-        t.createEvent(c, org.qx, org.qy, deadline, r, s);
+        t.createEvent(c, org.qx, org.qy, deadline, sig);
     }
 
     function test_withdraw_wrongRecipient_rejected() public {
         uint256 deadline = _now() + 600;
-        (bytes32 r, bytes32 s) = _sign(
+        bytes memory sig = _sign(
             alice, abi.encode(bytes32("ANZEN/withdraw/v1"), block.chainid, address(t), address(1), uint256(40e6), t.nonces(alice.id), deadline)
         );
         vm.expectRevert(AnzenTreasury.InvalidSignature.selector);
-        t.withdraw(alice.qx, alice.qy, address(2), 40e6, deadline, r, s);
+        t.withdraw(alice.qx, alice.qy, address(2), 40e6, deadline, sig);
     }
 
     function test_splitRoundingDust_goesToOrganizer() public {
         AnzenTreasury.EventConfig memory c = _config(AnzenTreasury.NoShow.SplitAmongAttendees);
         c.capacity = 4;
         uint256 deadline = _now() + 600;
-        (bytes32 r, bytes32 s) =
+        bytes memory sig =
             _sign(org, abi.encode(bytes32("ANZEN/create/v1"), block.chainid, address(t), t.nonces(org.id), deadline, c));
-        uint256 id = t.createEvent(c, org.qx, org.qy, deadline, r, s);
+        uint256 id = t.createEvent(c, org.qx, org.qy, deadline, sig);
         Key memory dave = _key(0xd4);
         Key memory erin = _key(0xe5);
         t.depositFor(dave.id, 10e6);
@@ -384,9 +428,14 @@ contract AnzenTreasuryTest is Test {
     uint256 constant AGENT_PK = 0xA6E7;
 
     function _delegate(Key memory owner, address agent, uint128 cap, uint64 expiry) internal {
+        _delegate(owner, agent, t.NO_AGENT_ID(), cap, expiry, OK);
+    }
+
+    function _delegate(Key memory owner, address agent, uint256 agentId, uint128 cap, uint64 expiry, bytes4 err) internal {
         uint256 deadline = _now() + 600;
-        (bytes32 r, bytes32 s) = _sign(owner, abi.encode(bytes32("ANZEN/delegate/v1"), block.chainid, address(t), agent, cap, expiry, t.nonces(owner.id), deadline));
-        t.delegate(owner.qx, owner.qy, agent, cap, expiry, deadline, r, s);
+        bytes memory sig = _sign(owner, abi.encode(bytes32("ANZEN/delegate/v1"), block.chainid, address(t), agent, agentId, cap, expiry, t.nonces(owner.id), deadline));
+        _expect(err);
+        t.delegate(owner.qx, owner.qy, agent, agentId, cap, expiry, deadline, sig);
     }
 
     function _agentCommit(uint256 id, Key memory owner, uint256 agentPk, bytes4 err) internal {
@@ -403,7 +452,7 @@ contract AnzenTreasuryTest is Test {
         _delegate(alice, agent, 25e6, uint64(_now() + 7 days));
         _agentCommit(id, alice, AGENT_PK, OK);
         assertEq(t.balanceOf(alice.id), 90e6); // alice's funds, alice's participation
-        (, , uint128 spent, ) = t.delegationOf(alice.id);
+        (, , uint128 spent, , ) = t.delegationOf(alice.id);
         assertEq(spent, AMOUNT);
         assertEq(uint8(t.participation(id, alice.id).status), uint8(AnzenTreasury.Status.Committed));
 
@@ -460,5 +509,127 @@ contract AnzenTreasuryTest is Test {
         uint64 exp = uint64(_now() + 60);
         Key memory impostor = _key(AGENT_PK);
         _checkIn(id, impostor, "qr-1", exp, _challenge(id, "qr-1", exp, issuerPk), AnzenTreasury.NotCommitted.selector);
+    }
+
+    // ---------------------------------------------------------------- WebAuthn passkeys
+
+    /// Builds a real WebAuthn assertion the way a browser + platform authenticator does: authenticatorData with
+    /// the UP and UV flags, clientDataJSON carrying base64url(challenge), signed over authData ‖ sha256(clientData).
+    function _webauthn(Key memory k, bytes memory message, bytes1 flags) internal pure returns (bytes memory) {
+        bytes memory authData = abi.encodePacked(sha256("anzen.app"), flags, uint32(1));
+        string memory clientData = string.concat(
+            '{"type":"webauthn.get","challenge":"', Base64.encodeURL(abi.encodePacked(sha256(message))),
+            '","origin":"https://anzen.app","crossOrigin":false}'
+        );
+        (bytes32 r, bytes32 s) = vm.signP256(k.pk, sha256(abi.encodePacked(authData, sha256(bytes(clientData)))));
+        if (uint256(s) > N / 2) s = bytes32(N - uint256(s));
+        return abi.encode(WebAuthn.WebAuthnAuth(r, s, 23, 1, authData, clientData));
+    }
+
+    function test_webauthnPasskey_commitAndCheckIn() public {
+        uint256 id = _create(AnzenTreasury.NoShow.SplitAmongAttendees);
+        uint256 deadline = _now() + 600;
+        bytes memory commitMsg = abi.encode(bytes32("ANZEN/commit/v1"), block.chainid, address(t), id, AMOUNT, t.nonces(alice.id), deadline);
+        t.commit(id, alice.qx, alice.qy, deadline, _webauthn(alice, commitMsg, 0x05));
+        assertEq(t.balanceOf(alice.id), 90e6);
+
+        vm.warp(_now() + 2 days + 1);
+        uint64 exp = uint64(_now() + 60);
+        bytes memory issuerSig = _challenge(id, "qr-1", exp, issuerPk);
+        bytes memory checkInMsg = abi.encode(bytes32("ANZEN/checkin/v1"), block.chainid, address(t), id, bytes32("qr-1"), exp);
+        t.checkIn(id, alice.qx, alice.qy, "qr-1", exp, issuerSig, _webauthn(alice, checkInMsg, 0x05));
+        assertTrue(t.participation(id, alice.id).attended);
+    }
+
+    function test_webauthn_requiresUserVerification_andRightChallenge() public {
+        uint256 id = _create(AnzenTreasury.NoShow.ToOrganizer);
+        uint256 deadline = _now() + 600;
+        bytes memory m = abi.encode(bytes32("ANZEN/commit/v1"), block.chainid, address(t), id, AMOUNT, t.nonces(alice.id), deadline);
+        bytes memory other = abi.encode(bytes32("ANZEN/commit/v1"), block.chainid, address(t), id + 1, AMOUNT, t.nonces(alice.id), deadline);
+        bytes memory presenceOnly = _webauthn(alice, m, 0x01); // no biometric/PIN
+        bytes memory wrongAction = _webauthn(alice, other, 0x05); // assertion for a different action
+        bytes memory wrongKey = _webauthn(bob, m, 0x05); // someone else's passkey
+        vm.expectRevert(AnzenTreasury.InvalidSignature.selector);
+        t.commit(id, alice.qx, alice.qy, deadline, presenceOnly);
+        vm.expectRevert(AnzenTreasury.InvalidSignature.selector);
+        t.commit(id, alice.qx, alice.qy, deadline, wrongAction);
+        vm.expectRevert(AnzenTreasury.InvalidSignature.selector);
+        t.commit(id, alice.qx, alice.qy, deadline, wrongKey);
+        t.commit(id, alice.qx, alice.qy, deadline, _webauthn(alice, m, 0x05)); // and the right one works
+    }
+
+    // ---------------------------------------------------------------- ERC-8004 show-up reputation
+
+    function _registeredAgent() internal returns (uint256 agentId, address agent) {
+        agent = vm.addr(AGENT_PK);
+        vm.prank(agent);
+        agentId = reg.register();
+    }
+
+    function test_showUpReputation_postedByTreasury() public {
+        (uint256 agentId, address agent) = _registeredAgent();
+        _delegate(alice, agent, agentId, 50e6, uint64(_now() + 7 days), OK);
+        _delegate(bob, agent, agentId, 50e6, uint64(_now() + 7 days), OK);
+        uint256 id = _create(AnzenTreasury.NoShow.SplitAmongAttendees);
+        _agentCommit(id, alice, AGENT_PK, OK);
+        _agentCommit(id, bob, AGENT_PK, OK);
+        assertEq(t.participation(id, alice.id).agentRef, agentId + 1);
+
+        vm.warp(_now() + 2 days + 1);
+        _checkInNow(id, alice); // bob's reservation was a no-show
+        vm.warp(_now() + 4 hours);
+        t.finalize(id);
+        t.settle(id, alice.id);
+        t.settle(id, bob.id);
+
+        (uint256 count, int128 avg) = reg.getSummary(agentId, address(t));
+        assertEq(count, 2);
+        assertEq(avg, 50); // show-up rate: 1 of 2
+    }
+
+    function test_showUp_notReportedForOwnerCommitsOrCancelledEvents() public {
+        (uint256 agentId, address agent) = _registeredAgent();
+        _delegate(alice, agent, agentId, 50e6, uint64(_now() + 7 days), OK);
+        uint256 id = _create(AnzenTreasury.NoShow.ToOrganizer);
+        _commit(id, bob); // bob committed himself: no agent involved
+        _agentCommit(id, alice, AGENT_PK, OK);
+        uint256 deadline = _now() + 600;
+        bytes memory sig = _sign(org, abi.encode(bytes32("ANZEN/cancel/v1"), block.chainid, address(t), id, t.nonces(org.id), deadline));
+        t.cancelEvent(id, org.qx, org.qy, deadline, sig);
+        t.settle(id, alice.id);
+        t.settle(id, bob.id);
+        (uint256 count,) = reg.getSummary(agentId, address(t));
+        assertEq(count, 0); // a cancellation says nothing about the agent
+    }
+
+    function test_delegate_rejectsSomeoneElsesAgentIdentity() public {
+        (uint256 agentId,) = _registeredAgent();
+        _delegate(alice, address(0xBEEF), agentId, 50e6, uint64(_now() + 7 days), AnzenTreasury.AgentIdentityMismatch.selector);
+    }
+
+    function test_lowGasCannotSilentlySkipReputation() public {
+        (uint256 agentId, address agent) = _registeredAgent();
+        _delegate(alice, agent, agentId, 50e6, uint64(_now() + 7 days), OK);
+        uint256 id = _create(AnzenTreasury.NoShow.ToOrganizer);
+        _agentCommit(id, alice, AGENT_PK, OK);
+        vm.warp(_now() + 3 days);
+        t.finalize(id);
+        vm.expectRevert(AnzenTreasury.InsufficientGasForReputation.selector);
+        t.settle{gas: 120_000}(id, alice.id); // enough to settle, not enough to report: must revert, not skip
+        t.settle(id, alice.id);
+        (uint256 count,) = reg.getSummary(agentId, address(t));
+        assertEq(count, 1);
+    }
+
+    function test_reputationFailureNeverBlocksSettlement() public {
+        (uint256 agentId, address agent) = _registeredAgent();
+        _delegate(alice, agent, agentId, 50e6, uint64(_now() + 7 days), OK);
+        uint256 id = _create(AnzenTreasury.NoShow.ToOrganizer);
+        _agentCommit(id, alice, AGENT_PK, OK);
+        vm.warp(_now() + 3 days);
+        t.finalize(id);
+        vm.mockCallRevert(address(reg), abi.encodeWithSelector(IERC8004Reputation.giveFeedback.selector), "down");
+        t.settle(id, alice.id); // still settles
+        assertEq(uint8(t.participation(id, alice.id).status), uint8(AnzenTreasury.Status.Settled));
     }
 }

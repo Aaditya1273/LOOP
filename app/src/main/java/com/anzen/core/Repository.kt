@@ -220,7 +220,8 @@ class Repository @Inject constructor(
     }
 
     /** Approves (cap > 0) or revokes (agent = zero address, cap 0) the AI agent's budget. */
-    suspend fun delegate(activity: FragmentActivity, agent: String, cap: Long, expiry: Long, onState: (TxState) -> Unit) {
+    suspend fun delegate(activity: FragmentActivity, agent: String, agentId: java.math.BigInteger, cap: Long, expiry: Long,
+                         onState: (TxState) -> Unit) {
         val h = health()
         var deadline = 0L
         val revoking = cap == 0L
@@ -229,9 +230,9 @@ class Repository @Inject constructor(
                 if (revoking) "It won't be able to reserve anything" else "Reservations only, until ${Format.date(expiry)} · ${h.network}") {
                 val acct = api.account(requireKey())
                 deadline = h.now.coerceAtLeast(System.currentTimeMillis() / 1000) + 600
-                Messages.delegate(h.chainId, h.treasury, agent, cap, expiry, acct.nonce, deadline)
+                Messages.delegate(h.chainId, h.treasury, agent, agentId, cap, expiry, acct.nonce, deadline)
             },
-            submit = { api.delegate(agent, cap, expiry, deadline, it!!) },
+            submit = { api.delegate(agent, agentId, cap, expiry, deadline, it!!) },
             verified = { api.account(requireKey()).delegation?.let { d -> d.cap == cap && d.agent.equals(agent, true) } == true },
             onState = onState)
     }

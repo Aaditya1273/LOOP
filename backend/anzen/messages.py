@@ -69,10 +69,15 @@ def challenge_hash(chain_id: int, treasury: str, event_id: int, challenge: bytes
                          [tag("ANZEN/challenge/v1"), chain_id, treasury, event_id, challenge, expires_at]))
 
 
-def delegate(chain_id: int, treasury: str, agent: str, cap: int, expiry: int, nonce: int, deadline: int) -> bytes:
-    """Owner's P-256 key grants (cap > 0) or revokes (agent 0x0, cap 0) an agent's commit budget."""
-    return encode(["bytes32", "uint256", "address", "address", "uint128", "uint64", "uint256", "uint256"],
-                  [tag("ANZEN/delegate/v1"), chain_id, treasury, agent, cap, expiry, nonce, deadline])
+NO_AGENT_ID = 2**256 - 1
+
+
+def delegate(chain_id: int, treasury: str, agent: str, agent_id: int, cap: int, expiry: int, nonce: int,
+             deadline: int) -> bytes:
+    """Owner's key grants (cap > 0) or revokes (agent 0x0, cap 0) an agent's commit budget. `agent_id` is the
+    agent's ERC-8004 identity (its registered wallet must be `agent`) or NO_AGENT_ID."""
+    return encode(["bytes32", "uint256", "address", "address", "uint256", "uint128", "uint64", "uint256", "uint256"],
+                  [tag("ANZEN/delegate/v1"), chain_id, treasury, agent, agent_id, cap, expiry, nonce, deadline])
 
 
 def agent_commit_hash(chain_id: int, treasury: str, event_id: int, key_id: bytes, amount: int, agent_nonce: int,
