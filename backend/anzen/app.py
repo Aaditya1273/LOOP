@@ -90,7 +90,7 @@ def create_app(svc: Anzen | None = None) -> FastAPI:
     @app.exception_handler(Exception)
     async def unexpected(_: Request, e: Exception):
         logging.getLogger("anzen").exception("unhandled")
-        return JSONResponse(status_code=500, content={"error": "ServerError", "detail": type(e).__name__})
+        return JSONResponse(status_code=500, content={"error": "ServerError", "detail": f"{type(e).__name__}: {str(e)[:200]}"})
 
     @app.get("/health")
     def health():

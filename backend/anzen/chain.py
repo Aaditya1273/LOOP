@@ -36,6 +36,7 @@ class Chain:
         # ponytail: one lock serializes relayer nonces; a nonce manager if throughput matters.
         self.lock = threading.Lock()
         self._chain_id: int | None = None
+        self.nonce_store = None  # a shared store (Postgres) when several instances send from this relayer
 
     # ---------- reads
 
@@ -138,19 +139,27 @@ class Chain:
                 "from": self.relayer.address, "gas": int(gas * 1.25) + 20_000, "nonce": nonce}))
 
     def _broadcast(self, build) -> str:
-        """Signs and sends with the relayer's next nonce. Serverless instances share the relayer, so two can pick the
-        same nonce; the loser re-reads the pending nonce and retries instead of failing the user's action."""
-        for attempt in range(4):
-            nonce = self._rpc(lambda: self.w3.eth.get_transaction_count(self.relayer.address, "pending"))
-            signed = self.relayer.sign_transaction(build(nonce))
-            try:
-                return "0x" + self._rpc(lambda: self.w3.eth.send_raw_transaction(signed.raw_transaction)).hex().removeprefix("0x")
-            except Exception as e:
-                msg = str(e).lower()
-                if attempt < 3 and any(k in msg for k in ("nonce", "already known", "underpriced", "replacement")):
-                    time.sleep(0.4 * (attempt + 1))
-                    continue
-                raise
+        """Signs and sends with the relayer's next nonce. Serverless instances share one relayer key and the RPC's
+        pending count doesn't see a transaction another instance sent a moment ago, so when the service runs on
+        Postgres every send happens under a database-wide lock with the next nonce kept in the database."""
+        if self.nonce_store is None:
+            return self._send_with(build, self._rpc(lambda: self.w3.eth.get_transaction_count(self.relayer.address, "pending")))
+        db = self.nonce_store
+        with db:
+            db.execute("SELECT pg_advisory_xact_lock(8004)")
+            row = db.execute("SELECT next_nonce, updated_at FROM relayer WHERE id=1").fetchone()
+            onchain = self._rpc(lambda: self.w3.eth.get_transaction_count(self.relayer.address, "pending"))
+            # A stored nonce older than a minute may belong to a transaction that never landed: trust the chain then.
+            nonce = max(onchain, row["next_nonce"]) if row and time.time() - row["updated_at"] < 60 else onchain
+            tx = self._send_with(build, nonce)
+            db.execute("INSERT INTO relayer(id, next_nonce, updated_at) VALUES (1, ?, ?) "
+                       "ON CONFLICT (id) DO UPDATE SET next_nonce = excluded.next_nonce, updated_at = excluded.updated_at",
+                       (nonce + 1, time.time()))
+            return tx
+
+    def _send_with(self, build, nonce: int) -> str:
+        signed = self.relayer.sign_transaction(build(nonce))
+        return "0x" + self._rpc(lambda: self.w3.eth.send_raw_transaction(signed.raw_transaction)).hex().removeprefix("0x")
 
     def send_value(self, to: str, wei: int) -> str:
         with self.lock:

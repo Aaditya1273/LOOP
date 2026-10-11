@@ -59,6 +59,8 @@ class Anzen:
     def __init__(self, db: sqlite3.Connection, chain: Chain, *, faucet_amount: int = 100_000_000,
                  public_rpc: str | None = None):
         self.db, self.chain, self.faucet_amount, self.public_rpc = db, chain, faucet_amount, public_rpc
+        if not isinstance(db, sqlite3.Connection):  # Postgres: instances must agree on the relayer's nonces
+            chain.nonce_store = db
 
     # ---------------------------------------------------------------- reads
 
