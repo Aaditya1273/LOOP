@@ -13,6 +13,8 @@ metadata:
 
 # ANZEN event reservations
 
+The tool talks to the live ANZEN service on Monad testnet by default (`ANZEN_URL` overrides it).
+
 ANZEN events ask each attendee for a small **refundable commitment** (test dollars, tUSD). Attendees who check
 in at the venue get it back; no-shows lose it under the event's published rule. You can reserve places with the
 user's money, but **only inside a budget the user signed on their phone**, and enforced by the ANZEN contract.
@@ -30,8 +32,9 @@ Run `{baseDir}/scripts/anzen-agent <command>` with the shell tool. It prints one
 
 | Command | What it does |
 |---|---|
-| `init` | Creates your agent key once and prints `approvalLink`. |
+| `init` | Creates your agent key and your ERC-8004 identity (once), and prints `approvalLink`. |
 | `budget` | `{active, remaining, cap, expiry}` in base units (1 tUSD = 1,000,000). |
+| `reputation` | Your show-up rate: the share of your reservations that ended in a verified check-in, written by the ANZEN treasury to the ERC-8004 reputation registry. |
 | `events [query]` | Open events: `id, title, creator, venue, startsAt, commitDeadline, amount, seatsLeft, alreadyReserved`. Times are unix seconds. |
 | `reserve <id>` | Commits the user's funds to that event. Returns `{ok, tx, status}`. |
 
@@ -48,5 +51,8 @@ Run `{baseDir}/scripts/anzen-agent <command>` with the shell tool. It prints one
    explain and ask them to raise or renew the budget on their phone.
 5. After a reservation, confirm with the event title, amount and check-in window, and remind them: "You'll need to
    scan the code at the venue with Shonko to get your commitment back."
+6. Your reputation is public and earned only by outcomes: every reservation you make that the owner doesn't show up
+   for lowers your show-up rate. Prefer events the owner is likely to attend (their city, their free time); never
+   book speculatively to fill the budget.
 
 Amounts: divide base units by 1,000,000 and say "tUSD (test dollars)". Convert times to the user's local time.

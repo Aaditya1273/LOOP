@@ -8,7 +8,7 @@ for its owner inside the budget the owner signed on their phone.
   python -m anzen.agent reserve <event_id>    commit the owner's funds to one event (within budget)
 
 Environment:
-  ANZEN_URL           service URL (default http://127.0.0.1:8790)
+  ANZEN_URL           service URL (default: the live service, https://anzen-shonko.vercel.app)
   ANZEN_OWNER         the owner's account key id (0x..., shown in Shonko > Profile)
   ANZEN_AGENT_KEYFILE agent key file (default ~/.anzen/agent.key)
 
@@ -30,7 +30,7 @@ from eth_account.messages import encode_defunct
 
 from . import messages
 
-BASE = os.environ.get("ANZEN_URL", "http://127.0.0.1:8790").rstrip("/")
+BASE = os.environ.get("ANZEN_URL", "https://anzen-shonko.vercel.app").rstrip("/")  # live service on Monad testnet
 KEYFILE = Path(os.environ.get("ANZEN_AGENT_KEYFILE", Path.home() / ".anzen" / "agent.key"))
 DEFAULT_CAP = 20  # tUSD suggested in the approval link; the owner chooses the real cap
 

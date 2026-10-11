@@ -32,11 +32,17 @@ KEY_FILE = Path(__file__).resolve().parent.parent / ".dev" / "seed_organizer.pem
 def http(method: str, path: str, body: dict | None = None) -> dict:
     req = urllib.request.Request(BASE + path, method=method, headers={"Content-Type": "application/json"},
                                  data=json.dumps(body).encode() if body is not None else None)
-    try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            return json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        raise SystemExit(f"{method} {path} -> {e.code} {e.read().decode()}") from None
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            raise SystemExit(f"{method} {path} -> {e.code} {e.read().decode()}") from None
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            # transient network failure; reads are safe to repeat, and every write is idempotent by signature
+            if attempt == 3:
+                raise
+            time.sleep(2 * (attempt + 1))
 
 
 def key() -> ec.EllipticCurvePrivateKey:

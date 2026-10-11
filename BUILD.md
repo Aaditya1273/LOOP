@@ -1,6 +1,6 @@
 # Building and running ANZEN · Shonko
 
-Stage 1 of the protocol described in [README.md](README.md): the **Creator IRL Drop**, end to end, as an Android
+Stage 1 of the protocol described in [docs/SPEC.md](docs/SPEC.md): the **Creator IRL Drop**, end to end, as an Android
 app (Shonko), a Solidity treasury for Monad, and a small service that relays signed actions and issues venue
 check-in codes.
 

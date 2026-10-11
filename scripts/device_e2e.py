@@ -92,6 +92,17 @@ def enter_pin() -> None:
     time.sleep(1.0)
 
 
+def unlock() -> None:
+    """Wake the device and get past the lock screen (swipe, or the test PIN once it's set)."""
+    adb("shell", "input", "keyevent", "224")
+    adb("shell", "wm", "dismiss-keyguard")
+    time.sleep(1)
+    if "isKeyguardShowing=true" in adb("shell", "dumpsys", "window"):
+        type_text(PIN)
+        adb("shell", "input", "keyevent", "66")
+        time.sleep(1)
+
+
 def shot(name: str) -> None:
     SHOTS.mkdir(parents=True, exist_ok=True)
     with open(SHOTS / f"{name}.png", "wb") as f:
@@ -317,7 +328,7 @@ def publish_and_desk() -> None:
 def agent_budget() -> None:
     step("AI agent: approve a budget from the agent's link, agent reserves, presence stays human")
     import json, os, sqlite3
-    env = {**os.environ, "ANZEN_AGENT_KEYFILE": str(ROOT / ".dev" / "e2e-agent.key")}
+    env = {**os.environ, "ANZEN_AGENT_KEYFILE": str(ROOT / ".dev" / "e2e-agent.key"), "ANZEN_URL": "http://127.0.0.1:8790"}
     run = lambda *a, **kw: subprocess.run([str(ROOT / "skills/anzen/scripts/anzen-agent"), *a], capture_output=True,
                                           text=True, env={**env, **kw})
     link = json.loads(run("init").stdout)["approvalLink"]
@@ -358,9 +369,9 @@ def main() -> None:
         return print(texts())
     if cmd == "shot":
         return shot(sys.argv[3])
+    unlock()  # fresh boots start on the lock screen
     adb("shell", "locksettings", "set-pin", PIN)
-    adb("shell", "input", "keyevent", "224")  # wake
-    adb("shell", "wm", "dismiss-keyguard")
+    unlock()
     try:
         # Fresh events each run: commitments close 10 min after publishing, check-in opens at 15.
         stamp = time.strftime("%H%M%S")

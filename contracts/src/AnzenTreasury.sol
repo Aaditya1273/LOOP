@@ -102,8 +102,9 @@ contract AnzenTreasury {
     bytes32 internal constant DELEGATE = "ANZEN/delegate/v1";
     bytes32 internal constant AGENT_COMMIT = "ANZEN/agentcommit/v1";
     uint256 public constant NO_AGENT_ID = type(uint256).max;
-    /// Gas reserved for the ERC-8004 feedback call (~179k measured against the Monad registry on first use).
-    uint256 public constant REPUTATION_GAS = 250_000;
+    /// Gas reserved for the ERC-8004 feedback call. Measured on Monad testnet at ~280-296k (Monad prices cold
+    /// storage above Ethereum's schedule, where the same call is ~179k), so this keeps ~100k of headroom.
+    uint256 public constant REPUTATION_GAS = 400_000;
 
     /// A scoped budget an owner key grants to an AI agent's EOA: the agent may commit the owner's balance to
     /// events, up to `cap` in total, until `expiry`. It can do nothing else: no check-in, no withdraw, no cancel.

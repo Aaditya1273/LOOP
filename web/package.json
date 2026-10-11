@@ -1,0 +1,13 @@
+{
+  "name": "shonko-web",
+  "private": true,
+  "type": "module",
+  "description": "Shonko web app: static files served by the ANZEN service. Dependencies are for tests only.",
+  "scripts": {
+    "test": "node vectors.test.mjs",
+    "e2e": "node passkey.e2e.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.0"
+  }
+}
