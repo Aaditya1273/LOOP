@@ -84,7 +84,7 @@ async function run(box, label, submit, verified, onDone) {
 const routes = [
   [/^#?\/?$/, home], [/^#\/events\/(\d+)$/, event], [/^#\/checkin/, checkin], [/^#\/desk\/(\d+)$/, desk],
   [/^#\/create$/, create], [/^#\/delegate/, delegate], [/^#\/proof\/(\d+)\/(0x[0-9a-fA-F]{64})$/, proof],
-  [/^#\/account$/, accountView], [/^#\/agent$/, agentView],
+  [/^#\/account$/, accountView], [/^#\/agent$/, agentView], [/^#\/agents$/, agentsBoard],
 ];
 
 async function render() {
@@ -122,6 +122,7 @@ async function home() {
       ${me.delegation?.active ? `<a class="card row" href="#/agent"><div><b>Your AI agent</b><span>${tusd(me.delegation.remaining)} of ${tusd(me.delegation.cap)} tUSD left${me.delegation.reputation?.showUpRate != null ? ` · show-up ${me.delegation.reputation.showUpRate}%` : ""}</span></div>${pill("Active", "accent")}</a>` : ""}` : signup()}
     ${live.length ? `<h3>Check-in open now</h3>${live.map(card).join("")}` : ""}
     <h3>Open for commitments</h3>${open.length ? open.map(card).join("") : '<p class="empty">No open events right now. Create one.</p>'}
+    <a class="card row" href="#/agents"><div><b>Agent show-up board</b><span>AI agents ranked by how often their humans actually came. Written by the treasury on ERC-8004.</span></div><span class="chev">›</span></a>
     <a class="card row" href="#/create"><div><b>Host an event</b><span>Fix the terms, run a check-in desk, let the treasury settle.</span></div><span class="chev">›</span></a>`;
   bindSignup();
   $("#faucet")?.addEventListener("click", () => run($("#fbox"), "100 test dollars added",
@@ -335,6 +336,16 @@ async function agentView() {
 }
 
 // ---------------------------------------------------------------- proof & account
+
+async function agentsBoard() {
+  const rows = await api("/agents");
+  view.innerHTML = `<h2>Agent show-up board</h2>
+    <p class="muted">Every AI agent an owner has given a budget, with the reputation the ANZEN treasury wrote for it in Monad's official ERC-8004 registry. One point per settled reservation: 100 if the human checked in, 0 if not. Fake reviewers can't add to it.</p>
+    ${rows.length ? rows.map((a) => `<div class="card row"><div><b>ERC-8004 #${a.agentId}</b><span class="mono">${esc(a.agent.slice(0, 8))}…${esc(a.agent.slice(-4))}</span></div>
+      <div class="right"><b>${a.count ? `${a.showUpRate}%` : "—"}</b><span>${a.count ? `${a.count} settled` : "no settled reservations yet"}</span></div></div>`).join("")
+      : '<p class="empty">No agents yet. Run <code>anzen-agent init</code> and approve its budget.</p>'}
+    <p class="muted">Read it yourself: <code>getSummary(agentId, [treasury], "showUp", "anzen")</code> on the reputation registry.</p>`;
+}
 
 async function proof(eventId, keyId) {
   const p = await api(`/proof/${eventId}/${keyId}`), e = p.event, m = p.participation;

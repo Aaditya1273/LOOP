@@ -240,7 +240,17 @@ class Anzen:
         x, y = _bytes(qx), _bytes(qy)
         call = self.chain.treasury.functions.delegate(x, y, Web3.to_checksum_address(agent), agent_id, cap, expiry,
                                                       deadline, _auth(auth))
-        return {"tx": self._relay("delegate", f"delegate|{auth}", call, key_id=_hex(messages.key_id(x, y)))}
+        tx = self._relay("delegate", f"delegate|{auth}", call, key_id=_hex(messages.key_id(x, y)))
+        if agent_id != messages.NO_AGENT_ID and cap > 0:
+            self.db.execute("INSERT OR IGNORE INTO agents(agent_id, agent, first_seen) VALUES (?,?,?)",
+                            (str(agent_id), Web3.to_checksum_address(agent), time.time()))
+        return {"tx": tx}
+
+    def agents(self) -> list[dict]:
+        """Every agent an owner has bound a budget to, with the show-up reputation the treasury wrote for it."""
+        rows = self.db.execute("SELECT * FROM agents ORDER BY first_seen DESC LIMIT 100").fetchall()
+        out = [{"agentId": int(r["agent_id"]), "agent": r["agent"], **self.chain.show_up(int(r["agent_id"]))} for r in rows]
+        return sorted(out, key=lambda a: (-(a["count"]), -(a["showUpRate"] or 0)))
 
     def agent_info(self, agent: str, agent_id: int | None = None) -> dict:
         """What an agent needs to sign its next commit, and (with its ERC-8004 id) its show-up reputation."""

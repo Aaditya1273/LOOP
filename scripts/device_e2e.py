@@ -331,7 +331,7 @@ def agent_budget() -> None:
     env = {**os.environ, "ANZEN_AGENT_KEYFILE": str(ROOT / ".dev" / "e2e-agent.key"), "ANZEN_URL": "http://127.0.0.1:8790"}
     run = lambda *a, **kw: subprocess.run([str(ROOT / "skills/anzen/scripts/anzen-agent"), *a], capture_output=True,
                                           text=True, env={**env, **kw})
-    link = json.loads(run("init").stdout)["approvalLink"]
+    link = json.loads(run("init").stdout)["appLink"]
     open_link(link)
     wait_for("Your agent is asking for a budget", 20)
     shot("22_agent_request")

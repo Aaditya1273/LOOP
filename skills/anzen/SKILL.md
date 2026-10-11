@@ -40,7 +40,7 @@ Run `{baseDir}/scripts/anzen-agent <command>` with the shell tool. It prints one
 
 ## How to work
 
-1. If `budget` says no active budget, run `init` and send the user the `approvalLink`. Tell them: "Open this on
+1. If `budget` says no active budget, run `init` and send the user the `approvalLink` (web; `appLink` opens the Android app). Tell them: "Open this on
    your phone and approve a budget in Shonko. I can only spend inside it." Stop until they confirm.
 2. To find events, run `events`, filter by what the user asked for (topic, date, city, price), and skip any with
    `alreadyReserved: true` or `seatsLeft: 0`.

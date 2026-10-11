@@ -113,10 +113,11 @@ def cmd_init() -> None:
     if agent_id() is None and (aid := register_identity(a)) is not None:
         IDFILE.write_text(str(aid))
     aid = agent_id()
-    link = f"anzen://delegate?agent={a.address}&cap={DEFAULT_CAP}&days=7" + (f"&id={aid}" if aid is not None else "")
-    out({"ok": True, "agent": a.address, "erc8004AgentId": aid, "approvalLink": link},
+    query = f"agent={a.address}&cap={DEFAULT_CAP}&days=7" + (f"&id={aid}" if aid is not None else "")
+    web, app = f"{BASE}/#/delegate?{query}", f"anzen://delegate?{query}"
+    out({"ok": True, "agent": a.address, "erc8004AgentId": aid, "approvalLink": web, "appLink": app},
         f"agent {a.address}" + (f", ERC-8004 identity #{aid}" if aid is not None else "") +
-        f". Ask the owner to open this link on their phone and approve a budget: {link}")
+        f". Ask the owner to open this link and approve a budget with their passkey: {web}")
 
 
 def cmd_reputation() -> None:

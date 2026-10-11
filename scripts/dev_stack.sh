@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p .dev
 if [ "${1:-}" = "--fresh" ]; then
-  rm -f .dev/anvil-state.json contracts/deployments/31337.json backend/anzen-local-*.db*
+  rm -f .dev/anvil-state.json .dev/fork-block contracts/deployments/31337.json backend/anzen-local-*.db*
   (cd contracts && forge build -q)
 fi
 
@@ -19,7 +19,11 @@ ISSUER_KEY=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
 
 MONAD_TESTNET=https://testnet-rpc.monad.xyz
 export ERC8004_IDENTITY=0x8004A818BFB912233c491871b3d84c89A494BD9e ERC8004_REPUTATION=0x8004B663056A597Dffe9eCcC1965A193B7388713
-anvil --fork-url $MONAD_TESTNET --chain-id 31337 --hardfork osaka --port 8545 --silent --state .dev/anvil-state.json &
+# Pin the fork block: the saved local state only makes sense against the same remote state (otherwise e.g. an
+# ERC-8004 id minted locally can collide with one minted on testnet since).
+[ -f .dev/fork-block ] || cast block-number --rpc-url $MONAD_TESTNET > .dev/fork-block
+anvil --fork-url $MONAD_TESTNET --fork-block-number "$(cat .dev/fork-block)" --chain-id 31337 --hardfork osaka \
+  --port 8545 --silent --state .dev/anvil-state.json &
 ANVIL=$!
 trap 'kill $ANVIL $SERVICE 2>/dev/null' EXIT
 until cast chain-id --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; do sleep 0.2; done

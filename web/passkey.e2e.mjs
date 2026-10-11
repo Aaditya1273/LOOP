@@ -7,7 +7,7 @@ import { chromium } from "playwright";
 import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
 
-const BASE = process.env.ANZEN_WEB || "http://127.0.0.1:8790";
+const BASE = process.env.ANZEN_WEB || "http://localhost:8790"; // WebAuthn needs a domain name, not an IP
 const warp = (s) => execFileSync(new URL("../scripts/warp.sh", import.meta.url).pathname, [String(s)], { stdio: "pipe" });
 const step = (s) => console.log("✓", s);
 
@@ -18,8 +18,14 @@ await cdp.send("WebAuthn.enable");
 await cdp.send("WebAuthn.addVirtualAuthenticator", { options: {
   protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true,
   isUserVerified: true, automaticPresenceSimulation: true } });
-const until = (re, sel = "body", timeout = 120000) =>
-  page.waitForFunction(([r, s]) => new RegExp(r).test(document.querySelector(s)?.innerText || ""), [re.source, sel], { timeout });
+const until = async (re, sel = "body", timeout = 120000) => {
+  try {
+    await page.waitForFunction(([r, s]) => new RegExp(r).test(document.querySelector(s)?.innerText || ""), [re.source, sel], { timeout });
+  } catch (e) {
+    console.error(`waiting for ${re} — screen was:\n${(await page.locator("main").innerText()).slice(0, 800)}`);
+    throw e;
+  }
+};
 
 await page.goto(`${BASE}/#/`);
 await page.fill("#name", "E2E judge");

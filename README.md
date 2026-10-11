@@ -29,7 +29,7 @@ because every point comes from a real person checking in at a real venue.
 3. **Unlock.** When check-in closes the treasury applies the published rules: your commitment back, an equal share
    of no-shows' commitments, and a supporter passport recorded onchain.
 
-**Your AI agent** (e.g. [OpenClaw](skills/anzen/SKILL.md)) can find events and reserve places for you, inside a cap
+**Your AI agent** ([OpenClaw](skills/anzen/SKILL.md), or any MCP client such as Claude or Cursor) can find events and reserve places for you, inside a cap
 and expiry you approve with your passkey. It **can't** check in, cancel, withdraw or raise its own budget, and the
 contract enforces that. **Money can be delegated; presence can't.**
 
@@ -40,7 +40,9 @@ contract enforces that. **Money can be delegated; presence can't.**
 | **Sybil-proof agent reputation** | When an agent's reservation settles, the **treasury contract itself** writes feedback to Monad's official ERC-8004 reputation registry: 100 if the human showed up, 0 if not. `getSummary(agent, [treasury])` is the agent's show-up rate, and every data point cost a real refundable commitment and a verified check-in. A fake reviewer can't write it, and an agent can only raise it by booking things its human actually attends. |
 | **Presence is not delegable** | Every rival in this track gives agents budgets. ANZEN is the one where the agent's budget ends at the venue door: physical check-in needs the owner's passkey and a 45-second code. |
 | **Real passkeys, verified onchain** | WebAuthn assertions (OpenZeppelin `WebAuthn.verify`, user verification required) and Android Keystore keys, both through Monad's P-256 precompile. A judge can sign up in the browser in ten seconds. |
-| **Real, hosted, tested** | Live on Monad testnet, with proof transactions below. 33 contract tests, a fork test against the **real** ERC-8004 registries, 13 service tests on a real chain, 22 Android unit tests, browser passkey tests, 11 on-device journeys, and concurrency tests on the live service. |
+| **Any agent, one protocol** | An OpenClaw skill and an MCP server ([`.mcp.json`](.mcp.json)) expose the same five tools: setup, events, reserve, budget, reputation. Neither has a check-in tool, because the contract wouldn't accept one. |
+| **Public show-up board** | [`#/agents`](https://anzen-shonko.vercel.app/#/agents) ranks every agent with a budget by the show-up rate the treasury wrote for it. Hosts can see which agents book people who actually come. |
+| **Real, hosted, tested** | Live on Monad testnet, with proof transactions below. 33 contract tests, a fork test against the **real** ERC-8004 registries, 14 service tests on a real chain (incl. the MCP server over stdio), 22 Android unit tests, browser passkey tests, 11 on-device journeys, and concurrency tests on the live service. |
 
 ## Try it in two minutes
 
@@ -55,7 +57,8 @@ contract enforces that. **Money can be delegated; presence can't.**
 
 **With an AI agent:** `skills/anzen/scripts/anzen-agent init` registers the agent's ERC-8004 identity and prints an
 approval link. Open it, approve a budget with your passkey, then ask OpenClaw *"find me something this week under
-10 and book it"* ([scripts/agent_demo.sh](scripts/agent_demo.sh)).
+10 and book it"* ([scripts/agent_demo.sh](scripts/agent_demo.sh)). In Claude Code, the repo's `.mcp.json` loads the
+same tools: `ANZEN_OWNER=0x<your account key> claude`, then *"reserve me a seat at the builders' night"*.
 
 ## How it works
 
@@ -99,7 +102,7 @@ and anyone can repeat it: `ANZEN_URL=https://anzen-shonko.vercel.app uv run pyth
 
 ```
 contracts/  AnzenTreasury.sol (+ tests, fork test vs real ERC-8004), TestDollar.sol
-backend/    ANZEN service: relayer, venue-code issuer, policy store, proofs, agent CLI
+backend/    ANZEN service: relayer, venue-code issuer, policy store, proofs, agent CLI, MCP server
 web/        Shonko in the browser (passkeys), served by the service
 app/        Shonko for Android (Kotlin/Compose, Keystore keys, CameraX QR)
 skills/     OpenClaw skill

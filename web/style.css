@@ -116,3 +116,4 @@ input, textarea, select { width: 100%; padding: 12px; margin: 6px 0 2px; border:
 .passport h2 { color: var(--on-sealed); }
 #toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); opacity: 0; background: var(--sealed); color: var(--on-sealed); padding: 12px 18px; border-radius: 14px; transition: .24s var(--ease); pointer-events: none; z-index: 30; }
 #toast.on { opacity: 1; transform: translate(-50%, 0); }
+.row .right { text-align: right; display: flex; flex-direction: column; }

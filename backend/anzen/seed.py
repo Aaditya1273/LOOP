@@ -1,6 +1,7 @@
 """Development helper, LOCAL DEVNET OR TESTNET ONLY. Talks to a running service over HTTP like the app does.
 
   uv run python -m anzen.seed events        publish sample events from a seed organizer key
+  uv run python -m anzen.seed showcase      publish events that stay open for commitments for 19 days (judging window)
   uv run python -m anzen.seed quick <title>  publish one event: commitments close in 10 min, check-in in 15
   uv run python -m anzen.seed owner [agent cap id]  dev stand-in for the phone: fund the seed key, approve a budget
   uv run python -m anzen.seed desk <id>     print a live venue code (anzen:// link) for a seeded event
@@ -91,6 +92,20 @@ SAMPLES = [
 ]
 
 
+D = 86_400
+SHOWCASE = [
+    ("Monad Blitz Bengaluru: builders' night", "Monad community", "HSR Layout, Bengaluru",
+     "Demos, pizza, no slides. Commit 5 to hold a seat; checked-in builders split the no-shows. Test event.", 1, 5, 60, 1,
+     (19 * D, 20 * D, 20 * D + 4 * 3600)),
+    ("Sunday long run, 10K", "Cubbon Park Runners", "Cubbon Park gate 3, Bengaluru",
+     "Pacers for 5:30 and 6:00/km. Show up and your commitment comes back. Test event.", 2, 3, 40, 1,
+     (19 * D, 20 * D - 3600, 20 * D + 3 * 3600)),
+    ("Founders' office hours", "Lena Okafor", "Unit 12, Lower Parel, Mumbai",
+     "Fifteen-minute slots with operators. No-shows fund the next session. Test event.", 3, 10, 12, 0,
+     (19 * D, 21 * D, 21 * D + 5 * 3600)),
+]
+
+
 def publish_samples() -> None:
     for sample in SAMPLES:
         print(f"#{publish(sample)}  {sample[0]}")
@@ -148,6 +163,9 @@ if __name__ == "__main__":
             wait(http("POST", "/delegate", {"agent": agent, "agentId": agent_id, "cap": cap, "expiry": expiry,
                                             "deadline": deadline, **sig})["tx"])
         print(kid)
+    elif cmd == "showcase":
+        for sample in SHOWCASE:
+            print(f"#{publish(sample)}  {sample[0]}")
     elif cmd == "desk":
         print(venue_code(int(sys.argv[2])))
     elif cmd == "checkin":

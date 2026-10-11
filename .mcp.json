@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "anzen": {
+      "command": "uv",
+      "args": ["--directory", "backend", "run", "python", "-m", "anzen.mcp_server"],
+      "env": { "ANZEN_OWNER": "${ANZEN_OWNER:-}" }
+    }
+  }
+}

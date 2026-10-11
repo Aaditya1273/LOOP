@@ -103,7 +103,10 @@ def main() -> None:
         rep = http("GET", f"/agents/{agent.address}?agentId={agent_id}")["reputation"]
         print(f"  ✓ ERC-8004 agent #{agent_id} show-up reputation (client = treasury): {rep}")
         assert rep["count"] == 1 and rep["showUpRate"] == 0  # bob's agent booked; bob didn't come
-        a, b = http("GET", f"/accounts/{a_id}"), http("GET", f"/accounts/{b_id}")
+        board = {a["agentId"]: a for a in http("GET", "/agents")}
+        assert board[agent_id]["count"] == 1, board.get(agent_id)
+        print(f"  ✓ agent #{agent_id} on the public show-up board")
+    a, b = http("GET", f"/accounts/{a_id}"), http("GET", f"/accounts/{b_id}")
     me = a["commitments"][0]["me"]
     assert a["balance"] == 105_000_000 and me["passportId"] > 0 and b["balance"] == 95_000_000, (a, b)
     print(f"\nalice: 105 tUSD (5 back + bob's 5), passport no. {me['passportId']}. bob: 95 tUSD (no-show).")

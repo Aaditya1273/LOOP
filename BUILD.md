@@ -1,135 +1,108 @@
-# Building and running ANZEN · Shonko
+# Building, running and testing ANZEN · Shonko
 
-Stage 1 of the protocol described in [docs/SPEC.md](docs/SPEC.md): the **Creator IRL Drop**, end to end, as an Android
-app (Shonko), a Solidity treasury for Monad, and a small service that relays signed actions and issues venue
-check-in codes.
+The pitch and a two-minute walkthrough are in [README.md](README.md); the full protocol vision is in
+[docs/SPEC.md](docs/SPEC.md). This file is for running and checking the code.
+
+## Live deployment
+
+| | |
+|---|---|
+| App + service | https://anzen-shonko.vercel.app (Vercel; Postgres on Neon) |
+| Network | Monad testnet, chain 10143 |
+| Treasury | `0xb87750460d648B0D7C953B42aE6FcDB9245F5d8f` (`contracts/deployments/10143.json`) |
+| Test dollar (tUSD, no value) | `0x5799ab1E835225a824C550Fe3797Ce7a846Dff73` |
+| ERC-8004 registries (official, Monad testnet) | identity `0x8004A818BFB912233c491871b3d84c89A494BD9e`, reputation `0x8004B663056A597Dffe9eCcC1965A193B7388713` |
 
 ## What's real, what isn't
 
 | | Status |
 |---|---|
-| Treasury contract: commit, check-in, cancel, finalize, settle, passports, withdraw | **Real.** `contracts/src/AnzenTreasury.sol`, 26 Foundry tests |
-| AI agent budgets | **Real.** The owner's key signs a cap and expiry for an agent's EVM key (`delegate`); the agent can only reserve within it (`commitByAgent`). Check-in, cancel and withdraw stay owner-only, enforced by the contract |
-| OpenClaw skill | **Real.** `skills/anzen/` (SKILL.md + `anzen-agent` CLI). The CLI path is tested end to end; a live OpenClaw run needs your model key (see below) |
-| P-256 signature verification | **Real.** OpenZeppelin `P256.verify`: Monad's precompile at `0x0100`, Solidity fallback elsewhere. Tests use real P-256 signatures, no mock verifier |
-| Account keys | **Real.** Android Keystore P-256 key; every use needs biometric or screen lock, and the prompt names the action |
-| Passkeys / WebAuthn | **Not used.** Keys are device-bound Keystore keys verified as raw P-256 signatures, not synced passkeys or WebAuthn assertions (those need a domain with Digital Asset Links) |
-| Check-in evidence | **Real, with limits.** Issuer-signed venue code (valid 45 s) + participant signature, checked onchain. Shows this phone signed a fresh code; does **not** prove location |
-| Asset | `tUSD`, a valueless test token (`TestDollar.sol`). No real stablecoin or equity |
-| Network fees | Paid by the service's relayer. It can delay or refuse to submit; it cannot forge or alter a signed action |
-| Push notifications | **Not configured.** Check-in reminders are local alarms; outcomes appear on the next app open |
-| Monad testnet deployment | **Live.** Treasury `0xB6a9276948012c616e2cFd4299a05Ff985b62A04`, tUSD `0x03164E72ffEd3293350A9b66e40aF00E59645020` (`contracts/deployments/10143.json`). P-256 precompile verified there with a real signature. Reproduce the full lifecycle: `ANZEN_URL=… uv run python -m anzen.smoke` |
-| Encrypted commitments (BTX), ERC-8004 agents, real equities | **Not built** (spec stages 5–7) |
-| Disputes | Offchain, with the organizer's published contact. The onchain result is final |
+| Treasury: commit, venue check-in, cancel, finalize, settle, passports, withdraw | **Real.** 33 Foundry tests |
+| Accounts | **Real.** WebAuthn passkeys (browser) and Android Keystore keys, verified with OpenZeppelin `P256` / `WebAuthn` through Monad's precompile (0x0100). WebAuthn requires user verification |
+| AI agent budgets | **Real.** The owner signs a cap and an expiry bound to the agent's ERC-8004 identity; the agent can only reserve within it. Check-in, cancel, withdraw stay owner-only |
+| ERC-8004 show-up reputation | **Real, on the official registries.** On settlement of an agent's reservation, the treasury posts 100 (attended) or 0 (no-show); `getSummary(agentId, [treasury], "showUp", "anzen")` is the show-up rate. Fork test against Monad testnet; live run in [SUBMISSION.md](SUBMISSION.md) |
+| Check-in evidence | **Real, with limits.** Issuer-signed venue code (45 s) plus the owner's signature. Proves a fresh code was signed with the passkey, not the exact location |
+| OpenClaw | **Real.** `skills/anzen/` (SKILL.md + `anzen-agent` CLI), verified with a live OpenClaw agent (Gemini) |
+| MCP | **Real.** `backend/anzen/mcp_server.py` (stdio), loaded by `.mcp.json`; same tools and limits as the skill. Tested with an MCP client |
+| Show-up board | **Real.** `GET /agents` and `#/agents`: agents that owners bound a budget to, with `getSummary` from the registry |
+| Asset | tUSD, a valueless test token |
+| Fees | Paid by the service's relayer, which can delay a signed action but not forge or alter it |
+| Not built | Synced passkeys for the Android app (device-bound keys), push notifications, iOS, multi-witness check-in, audit |
 
 ## Layout
 
 ```
-contracts/   Foundry: AnzenTreasury.sol, TestDollar.sol, Deploy.s.sol, tests
-backend/     ANZEN service (FastAPI + SQLite + web3.py): policy store, relayer, check-in issuer, proofs
+contracts/   AnzenTreasury.sol, TestDollar.sol, Deploy.s.sol; tests incl. Erc8004Fork.t.sol (real registries)
+backend/     ANZEN service (FastAPI): relayer, venue-code issuer, policy store (SQLite or Postgres), proofs,
+             agent CLI (anzen/agent.py), MCP server (anzen/mcp_server.py), seeding, smoke run; serves web/
+web/         Shonko in the browser: passkeys (anzen.js), app (app.js); vectors.test.mjs, passkey.e2e.mjs
 app/         Shonko for Android (Kotlin, Compose, Hilt, CameraX, ZXing)
-  core/      Messages (byte-exact signing preimages), DeviceKey, Api, Repository, Rules (domain logic)
-  ui/        theme (tokens), components (design system), screens, Root (navigation)
-skills/      anzen/: OpenClaw skill and the agent CLI it drives (backend/anzen/agent.py)
-scripts/     dev_stack.sh (local devnet), warp.sh (fast-forward chain time), device_e2e.py (on-device journeys)
+skills/      OpenClaw skill
+scripts/     dev_stack.sh, warp.sh, device_e2e.py, agent_demo.sh, deploy_testnet.sh
+index.py     Vercel entry point (service + web app)
 ```
 
 ### How an action flows
 
-1. The app builds the exact bytes to sign (`core/Messages.kt`) from the terms it shows. These match
-   `abi.encode(...)` in the contract byte for byte (golden vectors in `MessagesTest.kt` and `backend/tests/test_messages.py`).
-2. The system prompt shows the action ("Commit 5 tUSD to “Rooftop listening session” · Monad testnet") and the
-   Keystore key signs it (SHA256withECDSA, normalized to low-s).
-3. The service simulates the call; if it would revert, nothing is broadcast and the contract's reason is returned.
-   Otherwise it relays it and returns the transaction hash. The same signature always returns the same transaction.
-4. The app tracks it: Submitted → Pending → Confirmed → **Verified** (contract state re-read and matches). A timeout is
-   shown as *Still pending*, never as success or failure. Success copy and haptics appear only at Verified.
+1. The client (browser, phone or agent) builds the exact bytes of the action, `abi.encode(TAG, chainId, treasury, ...)`.
+   These are byte-for-byte identical in Solidity, Python, Kotlin and JavaScript, checked by shared golden vectors.
+2. A passkey signs a WebAuthn assertion whose challenge is `sha256(bytes)`; an Android key signs `sha256(bytes)`
+   directly; an agent signs an EIP-191 message for `commitByAgent` only.
+3. The service simulates the call and returns the contract's reason if it would revert (nothing is broadcast), or relays it.
+   The same signature always maps to the same transaction.
+4. Clients track Submitted → Pending → Confirmed → **Verified** (contract state re-read). A timeout is "still pending",
+   never success or failure.
 
-## Run it locally
+## Run locally
 
-Needs Foundry, `uv`, JDK 17 and the Android SDK (`. scripts/toolchain.env` puts them on PATH).
+Needs Foundry, `uv`, Node 20+, JDK 17 and the Android SDK (`. scripts/toolchain.env` puts them on PATH).
 
 ```bash
 . scripts/toolchain.env
 (cd contracts && forge build)
-scripts/dev_stack.sh           # anvil (osaka, P-256 precompile) + contracts + service on :8790 + 3 sample events
-./gradlew :app:installDebug    # emulator reaches the host at 10.0.2.2:8790
-```
-
-The phone needs a screen lock (the key can only be created behind one). Helpers for the local chain:
-
-```bash
-scripts/warp.sh 3600                                            # move chain time forward
-(cd backend && uv run python -m anzen.seed quick "My event")    # event whose check-in opens in 15 min
-(cd backend && uv run python -m anzen.seed checkin <id>)        # adb command that opens a live venue code
-```
-
-## AI agent (OpenClaw)
-
-Money can be delegated; presence can't. An agent gets its own EVM key and asks the owner for a budget:
-
-```bash
-skills/anzen/scripts/anzen-agent init            # prints anzen://delegate?agent=0x…&cap=20&days=7
-# open that link on the phone → Shonko shows the request → approve with fingerprint/PIN
-ANZEN_OWNER=0x<account key> skills/anzen/scripts/anzen-agent events
-ANZEN_OWNER=0x<account key> skills/anzen/scripts/anzen-agent reserve <id>   # refused past the cap
-```
-
-With OpenClaw (one isolated turn, this repo as its workspace; your normal agents are untouched):
-
-```bash
-GEMINI_API_KEY=… ANZEN_OWNER=0x… scripts/agent_demo.sh "find me something in Bengaluru under 10 and book it"
+scripts/dev_stack.sh --fresh   # local fork of Monad testnet (real precompile + ERC-8004 registries) on :8545,
+                               # contracts, service + web app on http://localhost:8790, sample events
+scripts/warp.sh 3600           # fast-forward the local chain
+./gradlew :app:installDebug    # Android; the emulator reaches the host at 10.0.2.2:8790
 ```
 
 ## Tests
 
 ```bash
-(cd contracts && forge test)                      # 26: lifecycle, agent budgets, split math, invalid/high-s/replayed signatures,
-                                                  #     expired/foreign/forged venue codes, capacity, phases, double settle
-(cd backend && uv run pytest)                     # 12: full HTTP lifecycle on anvil with the real contracts, failure
-                                                  #     modes, idempotency, precompile present, shared golden vectors
-./gradlew :app:testDebugUnitTest :app:lintDebug   # 22 unit tests (encoding, DER/low-s, state machine, validation)
-python3 scripts/device_e2e.py emulator-5554 all   # on-device journeys
+(cd contracts && forge test)                                  # 33
+(cd contracts && MONAD_FORK=https://testnet-rpc.monad.xyz forge test --match-contract Erc8004Fork)  # real registries
+(cd backend && uv run pytest)                                 # 14, real contracts on a local chain + MCP over stdio
+(cd web && npm install && npm test && npm run e2e)            # encodings + passkey browser end to end (local stack)
+./gradlew :app:testDebugUnitTest :app:lintDebug               # 22 Android unit tests, lint
+python3 scripts/device_e2e.py emulator-5554 all               # 11 Android journeys (local stack)
+(cd backend && ANZEN_URL=https://anzen-shonko.vercel.app uv run python -m anzen.smoke)  # live testnet lifecycle
 ```
 
-`device_e2e.py` drives the real app on an emulator against the local devnet, with real signatures and the system PIN
-prompt: onboarding and key creation, faucet, discovery → details → commitment authorization, cancelled authorization
-(nothing funded, retryable), approving an agent budget from its link and the agent reserving within it, session restore after restart, malformed / expired / fresh venue codes, settlement and
-passport with its proof, wizard validation and draft saving, publishing an event from the wizard and running its
-check-in desk QR, and the offline error state. It sets PIN 1111 for the run and clears it afterwards.
-**Clearing the screen lock deletes the app's key**, as Android does for auth-bound Keystore keys.
-
-## Deploy to Monad testnet
-
-`scripts/deploy_testnet.sh` does all of this from `.env.local` (`PRIVATE_KEY`, `ANZEN_ISSUER_KEY`). By hand:
+## AI agent (OpenClaw)
 
 ```bash
-cd contracts
-forge script script/Deploy.s.sol --rpc-url https://testnet-rpc.monad.xyz --private-key $RELAYER_KEY --broadcast
-# writes deployments/10143.json
-cd ../backend && cp .env.example .env   # fill in RELAYER_KEY (funded with testnet MON) and a separate ISSUER_KEY
-set -a; . ./.env; set +a; uv run python -m anzen.app
-./gradlew :app:assembleRelease -Panzen.backendUrl=https://<your service>
+skills/anzen/scripts/anzen-agent init        # agent key + ERC-8004 identity; prints anzen://delegate?agent=…&id=…
+# open the link in Shonko (Android) or https://anzen-shonko.vercel.app/#/delegate?agent=…&id=…&cap=20&days=7 (web)
+ANZEN_OWNER=0x<account key> skills/anzen/scripts/anzen-agent events
+ANZEN_OWNER=0x<account key> skills/anzen/scripts/anzen-agent reserve <id>
+skills/anzen/scripts/anzen-agent reputation  # show-up rate written by the treasury
+GEMINI_API_KEY=… ANZEN_OWNER=0x… scripts/agent_demo.sh "find me something this week under 10 and book it"
+ANZEN_OWNER=0x… claude                       # Claude Code picks up .mcp.json: tools setup/events/reserve/budget/reputation
 ```
 
-Release builds refuse plain HTTP; the service must be served over HTTPS.
+## Deploy
 
-## Design
+- **Live events for judging:** `ANZEN_URL=https://anzen-shonko.vercel.app uv run python -m anzen.seed showcase`
+  (commitments stay open 19 days).
+- **Contracts:** `scripts/deploy_testnet.sh` (reads `.env.local`). Set `ERC8004_IDENTITY` / `ERC8004_REPUTATION` to
+  wire the registries and `TOKEN_OWNER` to the relayer that will run the faucet.
+- **Service + web:** Vercel project `anzen-shonko` from this repo (`index.py`, `requirements.txt`, `.vercelignore`).
+  Environment: `ANZEN_CHAIN_ID`, `ANZEN_RPC_URL`, `ANZEN_PUBLIC_RPC`, `ANZEN_RELAYER_KEY`, `ANZEN_ISSUER_KEY`,
+  `ANZEN_DATABASE_URL` (Postgres; relayer nonces are serialized across instances with an advisory lock).
+  A Dockerfile is included for any container host.
 
-Tokens live in `app/.../ui/theme/Theme.kt`: warm ivory and ink, one lime accent, semantic status colors whose text
-steps pass WCAG AA, light, dark and high-contrast (Android 14 contrast setting) variants, three radii, one easing
-curve, and durations of 140/240/300 ms (off when the system removes animations). Money and passports sit on the ink
-"sealed" surface; the floating tab bar is the only chrome layer (Android has no Liquid Glass, so it's a near-opaque
-elevated material). Status is never color alone: every pill carries a glyph shape and a label. The mark is a ring left
-open and closed by a lime seal, as a vector adaptive icon, a themed monochrome icon, a notification icon and the
-launch screen.
+## Known limits
 
-## Known limitations
-
-- One operator: a single relayer and a single check-in issuer key. A venue code works for anyone who can see it for 45 s.
-- The service lists events from its own database (one RPC call per event to read state): fine for a pilot, index logs beyond that.
-- The key can't be exported or recovered. Losing the phone or removing its screen lock loses the account. A withdraw
-  function exists in the contract but has no screen yet.
-- Event artwork is generated (six styles), not uploaded: there's no image hosting.
-- Portrait only; no tablet layout.
-- Not audited. A testnet demo is not a production security review.
+One relayer and one check-in issuer. A venue code works for anyone who can see it for 45 s. The service lists events
+from its own database (fine for a pilot; index logs beyond that). Android keys can't be exported or recovered.
+Not audited.

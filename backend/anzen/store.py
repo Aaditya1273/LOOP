@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS relays (
 CREATE INDEX IF NOT EXISTS relays_by_key ON relays(key_id, created_at);
 CREATE TABLE IF NOT EXISTS faucet (key_id TEXT PRIMARY KEY, created_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS desks (token TEXT PRIMARY KEY, event_id INTEGER NOT NULL, expires_at REAL NOT NULL);
+-- Agents that owners have bound a budget to (their ERC-8004 identity), for the public reputation board.
+CREATE TABLE IF NOT EXISTS agents (agent_id TEXT PRIMARY KEY, agent TEXT NOT NULL, first_seen REAL NOT NULL);
 -- Next relayer nonce, shared by every instance of the service (see Chain._broadcast).
 CREATE TABLE IF NOT EXISTS relayer (id INTEGER PRIMARY KEY, next_nonce INTEGER NOT NULL, updated_at REAL NOT NULL);
 """

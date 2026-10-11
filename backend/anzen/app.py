@@ -135,6 +135,10 @@ def create_app(svc: Anzen | None = None) -> FastAPI:
     def delegate(b: Delegate):
         return svc.delegate(b.agent, b.agentId, b.cap, b.expiry, b.qx, b.qy, b.deadline, b.auth)
 
+    @app.get("/agents")
+    def agents():
+        return svc.agents()
+
     @app.get("/agents/{agent}")
     def agent(agent: str, agentId: int | None = None):
         return svc.agent_info(agent, agentId)
