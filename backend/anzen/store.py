@@ -46,24 +46,33 @@ def connect(path: str | Path):
 class Postgres:
     """The few sqlite3.Connection behaviours the service relies on, over Postgres (Neon), for hosting where the
     disk doesn't persist: `?` placeholders, INSERT OR IGNORE, dict rows, `with db:` transactions, and
-    sqlite3.IntegrityError on a unique-key clash."""
+    sqlite3.IntegrityError on a unique-key clash. One connection per thread: the web server handles requests on
+    a thread pool, and a transaction must never be shared between two requests."""
 
     def __init__(self, url: str):
+        import re
+        import threading
+
         import psycopg
         from psycopg.rows import dict_row
-        self._psycopg = psycopg
-        self.conn = psycopg.connect(url, autocommit=True, row_factory=dict_row)
-        self._tx = None
-        import re
+        self._psycopg, self._url, self._row = psycopg, url, dict_row
+        self._local = threading.local()
         for stmt in re.sub(r"--[^\n]*", "", SCHEMA).split(";"):
             if stmt.strip():
                 self.conn.execute(stmt)
+
+    @property
+    def conn(self):
+        c = getattr(self._local, "conn", None)
+        if c is None or c.closed:
+            c = self._local.conn = self._psycopg.connect(self._url, autocommit=True, row_factory=self._row)
+        return c
 
     def execute(self, sql: str, params: tuple = ()):
         ignore = sql.lstrip().upper().startswith("INSERT OR IGNORE")
         sql = sql.replace("INSERT OR IGNORE", "INSERT").replace("?", "%s") + (" ON CONFLICT DO NOTHING" if ignore else "")
         try:
-            return self.conn.execute(sql, params)  # inside `with db:` this runs in the open transaction
+            return self.conn.execute(sql, params)  # inside `with db:` this runs in this thread's open transaction
         except self._psycopg.IntegrityError as e:
             raise sqlite3.IntegrityError(str(e)) from None
 
@@ -71,12 +80,13 @@ class Postgres:
         pass
 
     def __enter__(self):
-        self._tx = self.conn.transaction()
-        self._tx.__enter__()
+        tx = self.conn.transaction()
+        tx.__enter__()
+        self._local.tx = tx
         return self
 
     def __exit__(self, *exc):
-        tx, self._tx = self._tx, None
+        tx, self._local.tx = self._local.tx, None
         try:
             return tx.__exit__(*exc)
         except self._psycopg.IntegrityError as e:
