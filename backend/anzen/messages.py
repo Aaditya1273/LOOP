@@ -63,10 +63,15 @@ def desk(chain_id: int, treasury: str, event_id: int, deadline: int) -> bytes:
                   [tag("ANZEN/desk/v1"), chain_id, treasury, event_id, deadline])
 
 
-def challenge_hash(chain_id: int, treasury: str, event_id: int, challenge: bytes, expires_at: int) -> bytes:
-    """What the issuer signs (EIP-191 personal_sign over this 32-byte hash)."""
-    return keccak(encode(["bytes32", "uint256", "address", "uint256", "bytes32", "uint64"],
-                         [tag("ANZEN/challenge/v1"), chain_id, treasury, event_id, challenge, expires_at]))
+def challenge(chain_id: int, treasury: str, event_id: int, challenge: bytes, expires_at: int) -> bytes:
+    """The venue code the issuer signs: ed25519 over these bytes on Solana."""
+    return encode(["bytes32", "uint256", "address", "uint256", "bytes32", "uint64"],
+                  [tag("ANZEN/challenge/v1"), chain_id, treasury, event_id, challenge, expires_at])
+
+
+def challenge_hash(chain_id: int, treasury: str, event_id: int, challenge_: bytes, expires_at: int) -> bytes:
+    """What the issuer signs on Monad (EIP-191 personal_sign over this 32-byte hash)."""
+    return keccak(challenge(chain_id, treasury, event_id, challenge_, expires_at))
 
 
 NO_AGENT_ID = 2**256 - 1
@@ -80,9 +85,52 @@ def delegate(chain_id: int, treasury: str, agent: str, agent_id: int, cap: int, 
                   [tag("ANZEN/delegate/v1"), chain_id, treasury, agent, agent_id, cap, expiry, nonce, deadline])
 
 
+def agent_commit(chain_id: int, treasury: str, event_id: int, key_id: bytes, amount: int, agent_nonce: int,
+                 deadline: int) -> bytes:
+    """What an agent signs to book within its pass: ed25519 over these bytes on Solana."""
+    return encode(["bytes32", "uint256", "address", "uint256", "bytes32", "uint256", "uint256", "uint256"],
+                  [tag("ANZEN/agentcommit/v1"), chain_id, treasury, event_id, key_id, amount, agent_nonce, deadline])
+
+
 def agent_commit_hash(chain_id: int, treasury: str, event_id: int, key_id: bytes, amount: int, agent_nonce: int,
                       deadline: int) -> bytes:
-    """What the agent's EVM key signs (EIP-191 personal_sign over this 32-byte hash)."""
-    return keccak(encode(["bytes32", "uint256", "address", "uint256", "bytes32", "uint256", "uint256", "uint256"],
-                         [tag("ANZEN/agentcommit/v1"), chain_id, treasury, event_id, key_id, amount, agent_nonce,
-                          deadline]))
+    """What the agent's EVM key signs on Monad (EIP-191 personal_sign over this 32-byte hash)."""
+    return keccak(agent_commit(chain_id, treasury, event_id, key_id, amount, agent_nonce, deadline))
+
+
+# ---------------------------------------------------------------- v4
+
+CATEGORIES = {0: "Other", 1: "Fitness", 2: "Dining", 3: "Meetups", 4: "Health", 5: "Learning"}
+
+
+def create_v2(chain_id: int, treasury: str, nonce: int, deadline: int, c: EventConfig, category: int,
+              late_fee_bps: int) -> bytes:
+    """createEventWithTerms: the v1 config plus published terms (category, late-release fee)."""
+    return encode(["bytes32", "uint256", "address", "uint256", "uint256", *CONFIG_TYPES, "uint8", "uint16"],
+                  [tag("ANZEN/create/v2"), chain_id, treasury, nonce, deadline, *c.as_tuple(), category, late_fee_bps])
+
+
+def grant_pass(chain_id: int, treasury: str, agent: str, agent_id: int, cap: int, expiry: int, categories: int,
+               max_late_fee_bps: int, max_active: int, max_lead_days: int, nonce: int, deadline: int) -> bytes:
+    """An Agent Pass: delegate() plus rules, under one owner signature."""
+    return encode(["bytes32", "uint256", "address", "address", "uint256", "uint128", "uint64",
+                   "uint32", "uint16", "uint8", "uint16", "uint256", "uint256"],
+                  [tag("ANZEN/pass/v1"), chain_id, treasury, agent, agent_id, cap, expiry,
+                   categories, max_late_fee_bps, max_active, max_lead_days, nonce, deadline])
+
+
+def release(chain_id: int, treasury: str, event_id: int, nonce: int, deadline: int) -> bytes:
+    return encode(["bytes32", "uint256", "address", "uint256", "uint256", "uint256"],
+                  [tag("ANZEN/release/v1"), chain_id, treasury, event_id, nonce, deadline])
+
+
+def present(chain_id: int, treasury: str, event_id: int, issued_at: int) -> bytes:
+    """The guest's own check-in code for staff to scan (valid 45 s)."""
+    return encode(["bytes32", "uint256", "address", "uint256", "uint64"],
+                  [tag("ANZEN/present/v1"), chain_id, treasury, event_id, issued_at])
+
+
+def staff(chain_id: int, treasury: str, event_id: int, guest_key_id: bytes, issued_at: int) -> bytes:
+    """The organizer's countersignature on one scanned guest code."""
+    return encode(["bytes32", "uint256", "address", "uint256", "bytes32", "uint64"],
+                  [tag("ANZEN/staff/v1"), chain_id, treasury, event_id, guest_key_id, issued_at])

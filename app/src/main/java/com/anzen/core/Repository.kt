@@ -156,7 +156,7 @@ class Repository @Inject constructor(
                 Messages.commit(h.chainId, h.treasury, e.id, e.amount, acct.nonce, deadline)
             },
             submit = { api.commit(e.id, deadline, it!!) },
-            verified = { event(e.id).me?.status == "committed" },
+            verified = { event(e.id).me?.status in setOf("committed", "waitlisted") },
             onState = onState)
     }
 
@@ -212,9 +212,9 @@ class Repository @Inject constructor(
             Signing("Publish “${d.title.trim()}”", "Terms are fixed once published · ${h.network}") {
                 val acct = api.account(requireKey())
                 deadline = h.now.coerceAtLeast(System.currentTimeMillis() / 1000) + 600
-                Messages.create(h.chainId, h.treasury, acct.nonce, deadline, terms)
+                Messages.createV2(h.chainId, h.treasury, acct.nonce, deadline, terms, d.category, d.lateFeeBps)
             },
-            submit = { api.createEvent(policy, terms, deadline, it!!).also { tx -> txHash = tx } },
+            submit = { api.createEvent(policy, terms, d.category, d.lateFeeBps, deadline, it!!).also { tx -> txHash = tx } },
             verified = { api.tx(txHash).eventId?.also(onCreated) != null },
             onState = onState)
     }
@@ -236,6 +236,65 @@ class Repository @Inject constructor(
             verified = { api.account(requireKey()).delegation?.let { d -> d.cap == cap && d.agent.equals(agent, true) } == true },
             onState = onState)
     }
+
+    /** Gives the place back (or leaves the waitlist). Only the owner's key can; the agent never can. */
+    suspend fun release(activity: FragmentActivity, e: Event, onState: (TxState) -> Unit) {
+        val h = health()
+        val t = releaseTerms(e)
+        var deadline = 0L
+        perform(activity,
+            Signing(if (e.me?.status == "waitlisted") "Leave the waitlist" else "Give your place back",
+                "${Format.amount(t.refund)} ${h.asset.symbol} back" + (if (t.fee > 0) " · up to ${Format.amount(t.fee)} late fee" else "") + " · “${e.title}”") {
+                val acct = api.account(requireKey())
+                deadline = h.now.coerceAtLeast(System.currentTimeMillis() / 1000) + 600
+                Messages.release(h.chainId, h.treasury, e.id, acct.nonce, deadline)
+            },
+            submit = { api.release(e.id, deadline, it!!) },
+            verified = { event(e.id).me?.status == "released" },
+            onState = onState)
+    }
+
+    /** An Agent Pass: budget plus rules, bound by one signature. */
+    suspend fun grantPass(activity: FragmentActivity, agent: String, agentId: java.math.BigInteger, cap: Long, expiry: Long,
+                          rules: Messages.PassRules, onState: (TxState) -> Unit) {
+        val h = health()
+        var deadline = 0L
+        perform(activity,
+            Signing("Agent Pass: up to ${Format.amount(cap)} ${h.asset.symbol}", "${Categories.describe(rules.categories)} · " +
+                "until ${Format.date(expiry)} · ${h.network}") {
+                val acct = api.account(requireKey())
+                deadline = h.now.coerceAtLeast(System.currentTimeMillis() / 1000) + 600
+                Messages.grantPass(h.chainId, h.treasury, agent, agentId, cap, expiry, rules, acct.nonce, deadline)
+            },
+            submit = { api.pass(agent, agentId, cap, expiry, rules, deadline, it!!) },
+            verified = { api.account(requireKey()).delegation?.let { d -> d.cap == cap && d.agent.equals(agent, true) } == true },
+            onState = onState)
+    }
+
+    /** Guest (silver tier): signs a fresh code for the venue's staff to scan. Valid [PresenceCode.VALID_SECONDS]. */
+    suspend fun presenceCode(activity: FragmentActivity, e: Event): PresenceCode {
+        val h = api.health() // fresh chain time: the code is checked against it
+        val issuedAt = h.now
+        val sig = key.sign(activity, "Show check-in code", "For venue staff to scan · “${e.title}”",
+            Messages.present(h.chainId, h.treasury, e.id, issuedAt))
+        return PresenceCode(e.id, sig.qx, sig.qy, issuedAt, sig.auth)
+    }
+
+    /** Organizer: countersigns one scanned guest code and submits the check-in. */
+    suspend fun staffCheckIn(activity: FragmentActivity, e: Event, guest: PresenceCode, onState: (TxState) -> Unit) {
+        val h = health()
+        var before = -1
+        perform(activity,
+            Signing("Check in this guest", "Countersign their code for “${e.title}”") {
+                before = event(e.id).attended
+                Messages.staff(h.chainId, h.treasury, e.id, guest.keyId, guest.issuedAt)
+            },
+            submit = { api.staffCheckIn(e.id, guest, it!!) },
+            verified = { event(e.id).attended > before },
+            onState = onState)
+    }
+
+    suspend fun dashboard(): Dashboard = api.dashboard(requireKey())
 
     /** Organizer: signs once to open a desk, then fetches fresh venue codes with the returned token. */
     suspend fun openDesk(activity: FragmentActivity, e: Event): Desk {

@@ -24,3 +24,8 @@ __pycache__/
 .env.local
 /.playwright-mcp
 node_modules/
+
+# Solana program build output and its deploy keypair
+programs/anzen_core/target/
+programs/anzen_core/keys/
+contracts/deployments/solana-104.json

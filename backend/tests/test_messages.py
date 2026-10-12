@@ -33,6 +33,13 @@ def test_golden_vectors():
     assert h(m.cancel(10143, T, 7, 5, 1_800_000_600)) == "4d1419ebdaf75c90bdf278e1a891c8dea667214e9df00fb351211aa760ac5224"
     assert h(m.delegate(10143, T, ISSUER, 7, 20_000_000, 1_800_604_800, 6, 1_800_000_600)) == DELEGATE
     assert h(m.desk(10143, T, 7, 1_800_000_300)) == "ae130c5e88daa4d2c6aac044edeb9e72ece35b4a6cfec8bf8511d82a266430ab"
+    # v4
+    assert h(m.create_v2(10143, T, 3, 1_800_000_600, cfg, 1, 2000)) == "532166810d76b6c89fc99c75c68a1f1d615f0e8c359d54ad0da98e9dabd68d5e"
+    assert h(m.grant_pass(10143, T, ISSUER, 7, 20_000_000, 1_800_604_800, 6, 1000, 2, 7, 6, 1_800_000_600)) == \
+        "b64e4b0a1e07c8e3dd202df1fa5e6aaae09556ce69195e1440e34025877cd888"
+    assert h(m.release(10143, T, 7, 5, 1_800_000_600)) == "cd7cb7cae83abcf6e043551f107b92354780c8a7f166d981884f8072f4df3bd6"
+    assert h(m.present(10143, T, 7, 1_800_172_845)) == "437f254f2caaf77565fb8b1d3ac2ff942a6b1e0f50518c955cc564b966b9d590"
+    assert h(m.staff(10143, T, 7, org, 1_800_172_845)) == "a9f55ee9ff83aacad83b8e254b20fa2bacdbe1be9a2475139db4b2aa44c2632e"
 
 
 def test_app_policy_document_is_accepted():

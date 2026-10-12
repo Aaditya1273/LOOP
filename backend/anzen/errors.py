@@ -18,6 +18,12 @@ class Reason(StrEnum):
     ALREADY_SETTLED = "AlreadySettled"
     NOT_DELEGATED = "NotDelegated"
     BUDGET_EXCEEDED = "BudgetExceeded"
+    AGENT_IDENTITY_MISMATCH = "AgentIdentityMismatch"
+    CATEGORY_NOT_ALLOWED = "CategoryNotAllowed"
+    FEE_ABOVE_LIMIT = "FeeAboveLimit"
+    TOO_MANY_ACTIVE = "TooManyActive"
+    TOO_FAR_AHEAD = "TooFarAhead"
+    OWN_EVENT = "OwnEvent"
     # service
     POLICY_MISMATCH = "PolicyMismatch"
     INVALID_DESK = "InvalidDesk"
@@ -34,6 +40,8 @@ STATUS = {
     Reason.ALREADY_COMMITTED: 409, Reason.ALREADY_SETTLED: 409, Reason.FAUCET_USED: 409, Reason.WRONG_PHASE: 409,
     Reason.EVENT_FULL: 409, Reason.EXPIRED: 410, Reason.INSUFFICIENT_BALANCE: 402,
     Reason.CHAIN_UNAVAILABLE: 503,
+    Reason.CATEGORY_NOT_ALLOWED: 403, Reason.FEE_ABOVE_LIMIT: 403, Reason.TOO_MANY_ACTIVE: 403,
+    Reason.TOO_FAR_AHEAD: 403, Reason.AGENT_IDENTITY_MISMATCH: 403,
 }
 
 

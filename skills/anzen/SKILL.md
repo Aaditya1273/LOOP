@@ -13,7 +13,7 @@ metadata:
 
 # ANZEN event reservations
 
-The tool talks to the live ANZEN service on Monad testnet by default (`ANZEN_URL` overrides it).
+The tool talks to the live ANZEN service by default (`ANZEN_URL` overrides it). Reservations go over x402.
 
 ANZEN events ask each attendee for a small **refundable commitment** (test dollars, tUSD). Attendees who check
 in at the venue get it back; no-shows lose it under the event's published rule. You can reserve places with the
@@ -32,9 +32,9 @@ Run `{baseDir}/scripts/anzen-agent <command>` with the shell tool. It prints one
 
 | Command | What it does |
 |---|---|
-| `init` | Creates your agent key and your ERC-8004 identity (once), and prints `approvalLink`. |
+| `init` | Creates your agent key (on Monad also an ERC-8004 identity) once, and prints `approvalLink` for an Agent Pass. |
 | `budget` | `{active, remaining, cap, expiry}` in base units (1 tUSD = 1,000,000). |
-| `reputation` | Your show-up rate: the share of your reservations that ended in a verified check-in, written by the ANZEN treasury to the ERC-8004 reputation registry. |
+| `reputation` | Your show-up rate: the share of your reservations that ended in a verified check-in, written only by ANZEN's settlement. |
 | `events [query]` | Open events: `id, title, creator, venue, startsAt, commitDeadline, amount, seatsLeft, alreadyReserved`. Times are unix seconds. |
 | `reserve <id>` | Commits the user's funds to that event. Returns `{ok, tx, status}`. |
 

@@ -76,6 +76,10 @@ import com.anzen.ui.screens.AgentScreen
 import com.anzen.ui.screens.CheckInScreen
 import com.anzen.ui.screens.CommitScreen
 import com.anzen.ui.screens.CreateScreen
+import com.anzen.ui.screens.DashboardScreen
+import com.anzen.ui.screens.PresentScreen
+import com.anzen.ui.screens.ReleaseScreen
+import com.anzen.ui.screens.StaffScanScreen
 import com.anzen.ui.screens.DeskScreen
 import com.anzen.ui.screens.EventScreen
 import com.anzen.ui.screens.ExploreScreen
@@ -217,8 +221,18 @@ private fun AnzenNavHost(nav: NavHostController, start: String, vm: AppViewModel
         }
         composable("scan") { ScanScreen(back, onLink = { route -> nav.navigate(route) { popUpTo("scan") { inclusive = true } } }) }
         composable("desk/{id}", listOf(navArgument("id") { type = NavType.LongType })) {
-            DeskScreen(it.arguments!!.getLong("id"), vm, back)
+            DeskScreen(it.arguments!!.getLong("id"), vm, back, go)
         }
+        composable("staffscan/{id}", listOf(navArgument("id") { type = NavType.LongType })) {
+            StaffScanScreen(it.arguments!!.getLong("id"), vm, back)
+        }
+        composable("present/{id}", listOf(navArgument("id") { type = NavType.LongType })) {
+            PresentScreen(it.arguments!!.getLong("id"), vm, back)
+        }
+        composable("release/{id}", listOf(navArgument("id") { type = NavType.LongType })) {
+            ReleaseScreen(it.arguments!!.getLong("id"), vm, back)
+        }
+        composable("dashboard") { DashboardScreen(vm, back, go) }
         composable("treasury/{id}", listOf(navArgument("id") { type = NavType.LongType })) {
             TreasuryScreen(it.arguments!!.getLong("id"), vm, back, go)
         }
@@ -232,14 +246,21 @@ private fun AnzenNavHost(nav: NavHostController, start: String, vm: AppViewModel
             ProofScreen(it.arguments!!.getLong("id"), it.arguments!!.getString("key")!!, vm, back)
         }
         composable("activity") { ActivityScreen(vm, back, go) }
-        composable("agent?agent={agent}&cap={cap}&days={days}&id={id}", listOf(
+        composable("agent?agent={agent}&cap={cap}&days={days}&id={id}&cats={cats}&fee={fee}&active={active}&lead={lead}", listOf(
+            navArgument("cats") { type = NavType.StringType; nullable = true; defaultValue = null },
+            navArgument("fee") { type = NavType.StringType; nullable = true; defaultValue = null },
+            navArgument("active") { type = NavType.StringType; nullable = true; defaultValue = null },
+            navArgument("lead") { type = NavType.StringType; nullable = true; defaultValue = null },
             navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null },
             navArgument("agent") { type = NavType.StringType; nullable = true; defaultValue = null },
             navArgument("cap") { type = NavType.StringType; nullable = true; defaultValue = null },
             navArgument("days") { type = NavType.StringType; nullable = true; defaultValue = null })) {
             val a = it.arguments
+            val r = listOf("cats", "fee", "active", "lead").map { k -> a?.getString(k) }
+            val rules = if (r.all { it == null }) null else com.anzen.core.Messages.PassRules(r[0]?.toLongOrNull() ?: 0,
+                r[1]?.toIntOrNull() ?: 10_000, r[2]?.toIntOrNull() ?: 0, r[3]?.toIntOrNull() ?: 0)
             AgentScreen(a?.getString("agent"), a?.getString("cap")?.toLongOrNull(), a?.getString("days")?.toIntOrNull(),
-                a?.getString("id")?.toLongOrNull(), vm, back)
+                a?.getString("id")?.toLongOrNull(), rules, vm, back)
         }
     }
 }

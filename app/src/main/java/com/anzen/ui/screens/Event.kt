@@ -36,7 +36,10 @@ import com.anzen.core.NextAction
 import com.anzen.core.Outcome
 import com.anzen.core.Repository
 import com.anzen.core.TxState
+import com.anzen.core.canRelease
+import com.anzen.core.feeText
 import com.anzen.core.nextAction
+import com.anzen.core.releaseTerms
 import com.anzen.core.outcome
 import com.anzen.ui.ActionViewModel
 import com.anzen.ui.AppViewModel
@@ -146,10 +149,12 @@ fun EventScreen(id: Long, vm: AppViewModel, back: () -> Unit, go: (String) -> Un
                 InfoRow("Starts", Format.dateTime(ev.startsAt))
                 if (ev.timezone != java.time.ZoneId.systemDefault().id) InfoRow("Local to venue", Format.dateTime(ev.startsAt, ev.timezone))
                 InfoRow("Where", ev.venue)
+                if (ev.categoryName.isNotBlank()) InfoRow("Kind", ev.categoryName)
                 InfoRow("Commitments close", Format.dateTime(ev.commitDeadline))
                 InfoRow("Check-in", "${Format.dateTime(ev.checkInStart)} – ${Format.time(ev.checkInEnd)}")
                 Gap(8)
                 CapacityBar(ev.committed, ev.capacity)
+                if (ev.waitlisted > 0) { Gap(6); Text("${ev.waitlisted} on the waitlist", style = AnzenType.caption, color = Anzen.colors.textSecondary) }
             }
             SectionHeader("Terms")
             Panel { Terms(ev, symbol) }
@@ -160,9 +165,19 @@ fun EventScreen(id: Long, vm: AppViewModel, back: () -> Unit, go: (String) -> Un
             ev.me?.takeIf { it.status != "none" }?.let { me ->
                 SectionHeader("Your status")
                 Panel {
-                    InfoRow("Commitment", me.status.replace('_', ' ').replaceFirstChar(Char::uppercase))
+                    InfoRow("Commitment", when (me.status) {
+                        "waitlisted" -> "On the waitlist · ${Format.amount(ev.amount)} $symbol held"
+                        "released" -> "Place given back"
+                        else -> me.status.replace('_', ' ').replaceFirstChar(Char::uppercase)
+                    })
+                    if (me.byAgent) InfoRow("Reserved by", "Your AI agent")
                     if (me.attended) InfoRow("Checked in", Format.dateTime(me.checkedInAt))
+                    if (me.tier > 0) InfoRow("Check-in method", if (me.tier == 2) "Staff scanned your code" else "You scanned the venue code")
                     if (me.status == "settled") InfoRow("Returned to you", "${Format.amount(me.settledAmount)} $symbol")
+                    if (canRelease(ev)) {
+                        Gap(8)
+                        SecondaryButton(if (me.status == "waitlisted") "Leave the waitlist" else "Give my place back") { go("release/${ev.id}") }
+                    }
                     vm.repo.keyId?.let { k -> Gap(8); SecondaryButton("View proof") { go("proof/${ev.id}/$k") } }
                 }
             }
@@ -176,6 +191,8 @@ fun EventScreen(id: Long, vm: AppViewModel, back: () -> Unit, go: (String) -> Un
                         Gap(8)
                     }
                     SecondaryButton("Treasury") { go("treasury/${ev.id}") }
+                    Gap(8)
+                    SecondaryButton("Venue dashboard") { go("dashboard") }
                     if (!ev.cancelled && ev.phase in setOf("open", "closed")) {
                         Gap(8)
                         if (cancelTx == TxState.Review || cancelTx is TxState.Cancelled) SecondaryButton("Cancel event", destructive = true) { confirmCancel = true }
@@ -191,7 +208,7 @@ fun EventScreen(id: Long, vm: AppViewModel, back: () -> Unit, go: (String) -> Un
                     Text("Published terms", style = AnzenType.callout, color = Anzen.colors.textSecondary, modifier = Modifier.weight(1f))
                     if (ev.policyVerified) StatusPill("Match onchain hash", Tone.Verified) else StatusPill("Don't match", Tone.Failed)
                 }
-                TxReference("Published in", ev.createTx, s.health?.explorer?.let { it + ev.createTx })
+                TxReference("Published in", ev.createTx, s.health?.txLink(ev.createTx))
             }
             if (confirmCancel) ConfirmDialog("Cancel this event?",
                 "Everyone who committed can take a full refund, and no passports are issued. This can't be undone.",
@@ -225,6 +242,14 @@ private fun Terms(e: Event, symbol: String) {
     term("If you don't", if (e.noShow == "split") "Your commitment is shared equally among the people who checked in. If nobody checks in, it goes to the organizer."
         else "Your commitment goes to the organizer.")
     Divider()
+    term("If you can't make it", "Give your place back before commitments close (${Format.dateTime(e.commitDeadline)}) for a full " +
+        "refund; that also earns a streak shield. After that, " + (if (e.lateFeeBps > 0) "${feeText(e.lateFeeBps)} of the commitment " +
+        "goes to the organizer, unless someone on the waitlist takes your place at once." else "it's still free.") +
+        " Places can't be given back once check-in opens.")
+    Divider()
+    term("If it's full", "Committing puts you on the waitlist with your commitment held. If someone gives their place back, " +
+        "the first person waiting gets it automatically. Otherwise the whole amount comes back after the event.")
+    Divider()
     term("If it's cancelled", "The organizer can cancel until check-in opens. Everyone who committed can take a full refund.")
     Divider()
     term("How check-in works", "During the check-in window, scan the rotating code shown at the venue. Each code is valid for " +
@@ -239,7 +264,8 @@ private fun Terms(e: Event, symbol: String) {
 private fun EventAction(e: Event, go: (String) -> Unit) {
     val c = Anzen.colors
     when (nextAction(e)) {
-        NextAction.Commit -> PrimaryButton("Review commitment", enabled = e.policyVerified) { go("commit/${e.id}") }
+        NextAction.Commit -> PrimaryButton(if (e.committed >= e.capacity) "Join the waitlist" else "Review commitment",
+            enabled = e.policyVerified) { go("commit/${e.id}") }
         NextAction.CheckIn -> PrimaryButton("Check in", accent = true) { go("checkin/${e.id}") }
         NextAction.Settle, NextAction.RefundAvailable, NextAction.ViewResult -> PrimaryButton("View outcome") { go("result/${e.id}") }
         NextAction.WaitForCheckIn -> {
@@ -247,7 +273,10 @@ private fun EventAction(e: Event, go: (String) -> Unit) {
             else "Committed. Check-in opens ${Format.relative(e.checkInStart, e.now)} (${Format.dateTime(e.checkInStart)})."
             Text(text, style = AnzenType.callout, color = c.textSecondary)
         }
-        NextAction.Full -> Text("This event is full.", style = AnzenType.callout, color = c.textSecondary)
+        NextAction.Full -> Text("This event and its waitlist are full.", style = AnzenType.callout, color = c.textSecondary)
+        NextAction.Waitlisted -> Text("You're on the waitlist with ${Format.amount(e.amount)} held. If someone gives their place back, " +
+            "it's yours automatically; if not, the whole amount comes back after the event.", style = AnzenType.callout, color = c.textSecondary)
+        NextAction.Released -> Text("You gave your place back.", style = AnzenType.callout, color = c.textSecondary)
         NextAction.Closed -> Text("Commitments for this event are closed.", style = AnzenType.callout, color = c.textSecondary)
         NextAction.Cancelled -> Text("This event was cancelled.", style = AnzenType.callout, color = c.textSecondary)
         NextAction.Missed -> Text("Check-in has closed.", style = AnzenType.callout, color = c.textSecondary)
@@ -274,9 +303,10 @@ fun CommitScreen(id: Long, vm: AppViewModel, back: () -> Unit, go: (String) -> U
     Pushed("Review commitment", back, bottom = e?.let { ev ->
         {
             // Progress sits right above the button the user just pressed.
-            if (tx != TxState.Review) { TxProgress(tx, "Commitment recorded"); Gap(12) }
+            val full = ev.committed >= ev.capacity
+            if (tx != TxState.Review) { TxProgress(tx, if (full) "You're on the waitlist" else "Commitment recorded"); Gap(12) }
             when (tx) {
-                TxState.Review, TxState.Cancelled -> PrimaryButton("Authorize ${Format.amount(ev.amount)} $symbol",
+                TxState.Review, TxState.Cancelled -> PrimaryButton((if (full) "Join waitlist · " else "") + "Authorize ${Format.amount(ev.amount)} $symbol",
                     enabled = balance >= ev.amount && nextAction(ev) == NextAction.Commit && h != null) {
                     ctx.activity()?.let { a -> action.run { commit(a, ev, it) } }
                 }
@@ -288,6 +318,12 @@ fun CommitScreen(id: Long, vm: AppViewModel, back: () -> Unit, go: (String) -> U
     }) {
         Loaded(r, {}) { ev ->
             LargeTitle(ev.title, Modifier.padding(vertical = Spacing.m), subtitle = "by ${ev.creator}")
+            if (ev.committed >= ev.capacity) {
+                InfoNote("This event is full, so this joins the waitlist. Your ${Format.amount(ev.amount)} $symbol is held. If someone " +
+                    "gives their place back, the first person waiting gets it automatically. If nobody does, the whole amount " +
+                    "comes back after the event.", Tone.Pending)
+                Gap(12)
+            }
             SealedPanel {
                 Text("You commit", style = AnzenType.caption, color = Anzen.colors.onSealedSecondary)
                 AmountText(ev.amount, symbol, color = Anzen.colors.onSealed)
@@ -298,7 +334,8 @@ fun CommitScreen(id: Long, vm: AppViewModel, back: () -> Unit, go: (String) -> U
             Panel {
                 InfoRow("Asset", "${h?.asset?.label ?: symbol} ($symbol)")
                 InfoRow("Held by", "ANZEN treasury")
-                h?.let { InfoRow("Treasury contract", Format.shortHex(it.treasury), mono = true, copy = it.treasury) }
+                h?.let { InfoRow(if (it.solana) "ANZEN program" else "Treasury contract", Format.shortHex(it.programId ?: it.treasury),
+                    mono = true, copy = it.programId ?: it.treasury) }
                 InfoRow("Network", h?.network ?: "—")
                 InfoRow("Network fee", "None for you · paid by ANZEN's relayer")
                 InfoRow("Your balance after", "${Format.amount((balance - ev.amount).coerceAtLeast(0))} $symbol")
@@ -308,6 +345,8 @@ fun CommitScreen(id: Long, vm: AppViewModel, back: () -> Unit, go: (String) -> U
                 InfoRow("Check-in window", "${Format.dateTime(ev.checkInStart)} – ${Format.time(ev.checkInEnd)}")
                 InfoRow("If you don't check in", if (ev.noShow == "split") "Shared among attendees" else "Goes to organizer")
                 InfoRow("If cancelled", "Full refund")
+                InfoRow("Give it back before", "${Format.dateTime(ev.commitDeadline)} · free")
+                InfoRow("Give it back later", if (ev.lateFeeBps > 0) "${feeText(ev.lateFeeBps)} late fee, waived if the waitlist refills it" else "Free")
                 InfoRow("Commitments close", Format.dateTime(ev.commitDeadline))
             }
             Gap(16)
@@ -359,7 +398,7 @@ fun TreasuryScreen(id: Long, vm: AppViewModel, back: () -> Unit, go: (String) ->
                 InfoRow("Organizer key", Format.shortHex(e.organizer), mono = true, copy = e.organizer)
             }
             SectionHeader("Record")
-            Panel { TxReference("Published in", e.createTx, s.health?.explorer?.let { it + e.createTx }) }
+            Panel { TxReference("Published in", e.createTx, s.health?.txLink(e.createTx)) }
         }
     }
 }
@@ -402,11 +441,16 @@ fun ResultScreen(id: Long, vm: AppViewModel, back: () -> Unit, go: (String) -> U
                 Outcome.Refunded -> Triple("Refund completed", "The event was cancelled. ${Format.amount(me!!.settledAmount)} $symbol is back in your balance.", Tone.Verified)
                 Outcome.CancelledRefundPending -> Triple("Refund available", "The event was cancelled. Apply the refund to return your " +
                     "${Format.amount(e.amount)} $symbol.", Tone.Pending)
-                Outcome.AwaitingSettlement -> Triple("Ready to settle", "Check-in has closed. " + (if (me?.attended == true)
+                Outcome.AwaitingSettlement -> Triple("Ready to settle", "Check-in has closed. " + (if (me?.status == "waitlisted")
+                    "No place freed up for you, so applying the outcome returns your whole commitment." else if (me?.attended == true)
                     "You checked in; applying the outcome returns your commitment" + (if (e.noShow == "split") " and your share." else ".")
                     else "There's no check-in from this account, so applying the outcome closes your commitment under the no-show rule."), Tone.Pending)
                 Outcome.InProgress -> Triple("Not decided yet", "The outcome is applied after check-in closes ${Format.relative(e.checkInEnd, e.now)}.", Tone.Pending)
                 Outcome.NotParticipating -> Triple("No commitment", "This account didn't commit to this event.", Tone.Neutral)
+                Outcome.Released -> Triple("Place given back", "You gave your place back before check-in. The treasury returned " +
+                    "what the published terms allow to your balance.", Tone.Verified)
+                Outcome.WaitlistRefunded -> Triple("Waitlist refund", "No place freed up, so your whole ${Format.amount(me!!.settledAmount)} " +
+                    "$symbol came back. This doesn't count against your Show-Up Score.", Tone.Verified)
             }
             StatusPill(when (tone) { Tone.Verified -> "Settled onchain"; Tone.Pending -> "Pending"; else -> "Final" }, tone)
             Gap(12)
@@ -437,6 +481,64 @@ fun ResultScreen(id: Long, vm: AppViewModel, back: () -> Unit, go: (String) -> U
                 PrimaryButton("View supporter passport", accent = true) { go("passport/${e.id}") }
             }
             vm.repo.keyId?.let { k -> if (me != null && me.status != "none") { Gap(8); SecondaryButton("View proof") { go("proof/${e.id}/$k") } } }
+        }
+    }
+}
+
+/** Give the place back (or leave the waitlist): what comes back, any fee, the shield, then the owner's authorization. */
+@Composable
+fun ReleaseScreen(id: Long, vm: AppViewModel, back: () -> Unit) {
+    val r = rememberEvent(id, vm)
+    val s by vm.state.collectAsStateWithLifecycle()
+    val action: ActionViewModel = hiltViewModel()
+    val tx by action.tx.collectAsStateWithLifecycle()
+    val ctx = LocalContext.current
+    val haptics = rememberHaptics()
+    val symbol = s.health?.asset?.symbol ?: "tUSD"
+    LaunchedEffect(tx) {
+        if (tx is TxState.Verified) haptics.confirm()
+        if (tx is TxState.Failed) haptics.reject()
+    }
+    val e = r?.getOrNull()
+    val waiting = e?.me?.status == "waitlisted"
+    Pushed(if (waiting) "Leave the waitlist" else "Give your place back", back, bottom = e?.let { ev ->
+        {
+            if (tx != TxState.Review) { TxProgress(tx, if (waiting) "You left the waitlist" else "Place given back"); Gap(12) }
+            when (tx) {
+                TxState.Review, TxState.Cancelled -> PrimaryButton("Authorize", enabled = canRelease(ev)) {
+                    ctx.activity()?.let { a -> action.run { release(a, ev, it) } }
+                }
+                is TxState.Verified -> PrimaryButton("Done") { back() }
+                is TxState.Failed, is TxState.StillPending -> SecondaryButton("Back to event") { back() }
+                else -> PrimaryButton("Working…", loading = true) {}
+            }
+        }
+    }) {
+        Loaded(r, {}) { ev ->
+            val t = releaseTerms(ev)
+            LargeTitle(ev.title, Modifier.padding(vertical = Spacing.m), subtitle = "by ${ev.creator}")
+            SealedPanel {
+                Text("Comes back to your balance", style = AnzenType.caption, color = Anzen.colors.onSealedSecondary)
+                AmountText(t.refund, symbol, color = Anzen.colors.onSealed)
+                if (t.fee > 0) {
+                    Gap(8)
+                    Text("Late fee: ${Format.amount(t.fee)} $symbol (${feeText(ev.lateFeeBps)}) to the organizer, as published. " +
+                        "If someone on the waitlist takes your place in the same moment, there's no fee and the whole " +
+                        "${Format.amount(ev.amount)} comes back.", style = AnzenType.callout, color = Anzen.colors.onSealed)
+                }
+            }
+            Gap(16)
+            Panel {
+                InfoRow("Your commitment", "${Format.amount(ev.amount)} $symbol")
+                InfoRow("Commitments close", Format.dateTime(ev.commitDeadline))
+                if (!waiting) InfoRow("Streak shield", if (t.inTime) "Earned (up to 2)" else "Not earned: after the deadline")
+                InfoRow("Your place", if (waiting) "Leaves the waitlist" else if (ev.waitlisted > 0) "Goes to the first person waiting" else "Opens up")
+            }
+            Gap(16)
+            if (!canRelease(ev) && tx == TxState.Review) InfoNote("This can't be done any more: places can only be given back " +
+                "before check-in opens.", Tone.Pending)
+            else InfoNote("Only your key can do this; your AI agent can't. You're signing: give back your place at event #${ev.id}. " +
+                "The authorization expires in 10 minutes and can be used once.")
         }
     }
 }

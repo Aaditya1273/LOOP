@@ -4,6 +4,7 @@
   - issues short-lived check-in challenges to desks the organizer's key opened,
   - assembles proofs from onchain state and the transactions it relayed."""
 
+import base64
 import hashlib
 import json
 import logging
@@ -24,7 +25,7 @@ CHALLENGE_TTL = 45  # seconds a venue code stays valid
 MAX_SIGNATURE_WINDOW = 15 * 60
 AGENT_GAS_WEI = 50 * 10**15  # 0.05 MON: one ERC-8004 registration on Monad testnet (gas limit x fee is charged)
 NO_SHOW = {0: "organizer", 1: "split"}
-STATUS = {0: "none", 1: "committed", 2: "checked_in", 3: "settled"}
+STATUS = {0: "none", 1: "committed", 2: "checked_in", 3: "settled", 4: "waitlisted", 5: "released"}
 
 POLICY_TEXT = {"title": (1, 80), "description": (0, 2000), "creator": (1, 60), "venue": (1, 200),
                "timezone": (1, 64), "disputeContact": (1, 200)}
@@ -68,7 +69,8 @@ class Anzen:
         cid = self.chain.chain_id
         name, explorer = NETWORKS.get(cid, (f"Chain {cid}", None))
         return {"ok": True, "chainId": cid, "network": name, "explorer": explorer,
-                "treasury": self.chain.treasury.address, "token": self.chain.token.address,
+                "treasury": self.chain.treasury.address, "token": self.chain.token.address, "vm": getattr(self.chain, "vm", "evm"),
+                **({"programId": self.chain.treasury.program, "issuerKey": self.chain.issuer.key} if self._svm else {}),
                 "issuer": self.chain.issuer.address, "relayer": self.chain.relayer.address,
                 "relayerFunded": self.chain.relayer_balance() > 0, "faucet": cid not in MAINNETS,
                 "asset": {"symbol": "tUSD", "decimals": 6, "label": "Test dollar, no value"},
@@ -119,6 +121,9 @@ class Anzen:
             "checkInEnd": cfg["check_in_end"], "noShow": NO_SHOW[cfg["no_show"]],
             "committed": st["committed"], "attended": st["attended"], "cancelled": st["cancelled"],
             "finalized": st["finalized"], "attendeePayout": st["attendee_payout"],
+            "category": cfg["category"], "categoryName": messages.CATEGORIES.get(cfg["category"], "Other"),
+            "lateFeeBps": cfg["late_fee_bps"], "waitlisted": st["waitlisted"], "refilled": st["refilled"],
+            "released": st["released"], "recovered": st["recovered"],
             "phase": phase, "now": now, "createTx": row["create_tx"],
         }
         if key_id:
@@ -129,7 +134,8 @@ class Anzen:
         p = self.chain.participation(event_id, key_id)
         return {"status": STATUS[p["status"]], "attended": p["attended"], "checkedInAt": p["checked_in_at"],
                 "settledAmount": p["settled_amount"], "passportId": p["passport_id"],
-                "agentId": p["agent_ref"] - 1 if p["agent_ref"] else None}
+                "agentId": p["agent_ref"] - 1 if p["agent_ref"] else None, "tier": p["tier"], "byAgent": p["by_agent"],
+                **({"agent": p["agent"]} if p.get("agent") else {})}
 
     def account(self, key_id: str) -> dict:
         kid = _bytes(key_id)
@@ -138,12 +144,16 @@ class Anzen:
         d = self.chain.delegation(kid)
         active = d["agent"] != "0x0000000000000000000000000000000000000000" and d["expiry"] > self.chain.now()
         d["agentId"] = d.pop("agent_ref") - 1 if d["agent_ref"] else None
-        d["reputation"] = self.chain.show_up(d["agentId"]) if d["agentId"] is not None else None
+        d["reputation"] = (self.chain.show_up(d["agentId"]) if d["agentId"] is not None
+                           else self.chain.show_up(d["agent"]) if self._svm and int(d["agent"], 16) else None)
+        d["rules"], d["activeBookings"] = self.chain.pass_rules(kid)
+        record = self.chain.record(kid)
         return {
             "keyId": key_id, "balance": self.chain.balance(kid), "nonce": self.chain.nonce(kid),
+            "record": record, "score": self.chain.score(kid), "scoreBasis": record["attended"] + record["missed"],
             "delegation": {**d, "active": active, "remaining": max(d["cap"] - d["spent"], 0) if active else 0},
             "faucetUsed": self.db.execute("SELECT 1 FROM faucet WHERE key_id=?", (key_id,)).fetchone() is not None,
-            "commitments": [e for e in events if e["me"]["status"] != "none"],
+            "commitments": [e for e in events if e["me"]["status"] not in ("none", "released")],
             "organized": [e for e in events if e["organizer"] == key_id],
         }
 
@@ -205,15 +215,35 @@ class Anzen:
 
     def _explorer(self, tx: str) -> str | None:
         base = NETWORKS.get(self.chain.chain_id, (None, None))[1]
-        return base + tx if base else None
+        return (base.replace("{tx}", tx) if "{tx}" in base else base + tx) if base else None
+
+    @property
+    def _svm(self) -> bool:
+        return getattr(self.chain, "vm", "evm") == "svm"
+
+    @property
+    def _network(self) -> str:
+        return f"solana:{self.chain.chain_id}" if self._svm else f"eip155:{self.chain.chain_id}"
+
+    def _agent(self, agent: str) -> str:
+        """An agent's identity as this chain spells it: an EVM address, or a Solana ed25519 key (0x + 32 bytes hex)."""
+        if self._svm:
+            return "0x" + bytes(self.chain.agent_key(agent)).hex()
+        return Web3.to_checksum_address(agent)
 
     # ---------------------------------------------------------------- relayed actions
 
     def create_event(self, policy: str, cfg: messages.EventConfig, qx: str, qy: str, deadline: int,
-                     auth: str) -> dict:
+                     auth: str, terms: tuple[int, int] | None = None) -> dict:
+        """`terms` = (category, lateFeeBps): createEventWithTerms, and the document must state the same terms."""
         doc = self._validate_policy(policy, cfg)
-        call = self.chain.treasury.functions.createEvent(cfg.as_tuple(), _bytes(qx), _bytes(qy), deadline,
-                                                         _auth(auth))
+        f = self.chain.treasury.functions
+        if terms is None:
+            call = f.createEvent(cfg.as_tuple(), _bytes(qx), _bytes(qy), deadline, _auth(auth))
+        else:
+            if (doc.get("category"), doc.get("lateFeeBps")) != terms:
+                raise AnzenError(Reason.POLICY_MISMATCH, "category/lateFeeBps in the document differ from the signed terms")
+            call = f.createEventWithTerms(cfg.as_tuple(), terms, _bytes(qx), _bytes(qy), deadline, _auth(auth))
         tx = self._relay("create", f"create|{auth}", call, key_id=_hex(cfg.organizer), payload=policy)
         log.info(json.dumps({"stage": "create", "tx": tx, "title": doc["title"]}))
         return {"tx": tx}
@@ -223,6 +253,20 @@ class Anzen:
         return {"tx": self._relay("commit", f"commit|{event_id}|{auth}", call, event_id,
                                   _hex(messages.key_id(_bytes(qx), _bytes(qy))))}
 
+    def release(self, event_id: int, qx: str, qy: str, deadline: int, auth: str) -> dict:
+        """The owner gives their place back (or leaves the waitlist). Only the owner's key; never an agent."""
+        call = self.chain.treasury.functions.release(event_id, _bytes(qx), _bytes(qy), deadline, _auth(auth))
+        return {"tx": self._relay("release", f"release|{event_id}|{auth}", call, event_id,
+                                  _hex(messages.key_id(_bytes(qx), _bytes(qy))))}
+
+    def staff_check_in(self, event_id: int, gx: str, gy: str, issued_at: int, guest_auth: str, sx: str, sy: str,
+                       staff_auth: str) -> dict:
+        """Silver tier: the organizer's device scanned the guest's own 45-second code and countersigned it."""
+        call = self.chain.treasury.functions.checkInByStaff(event_id, _bytes(gx), _bytes(gy), issued_at,
+                                                            _auth(guest_auth), _bytes(sx), _bytes(sy), _auth(staff_auth))
+        return {"tx": self._relay("checkin", f"staff|{event_id}|{guest_auth}", call, event_id,
+                                  _hex(messages.key_id(_bytes(gx), _bytes(gy))))}
+
     def cancel(self, event_id: int, qx: str, qy: str, deadline: int, auth: str) -> dict:
         call = self.chain.treasury.functions.cancelEvent(event_id, _bytes(qx), _bytes(qy), deadline, _auth(auth))
         return {"tx": self._relay("cancel", f"cancel|{event_id}|{auth}", call, event_id,
@@ -231,34 +275,68 @@ class Anzen:
     def check_in(self, event_id: int, qx: str, qy: str, challenge: str, expires_at: int, issuer_sig: str,
                  auth: str) -> dict:
         call = self.chain.treasury.functions.checkIn(event_id, _bytes(qx), _bytes(qy), _bytes(challenge), expires_at,
-                                                     _bytes(issuer_sig, 65), _auth(auth))
+                                                     _bytes(issuer_sig, 64 if self._svm else 65), _auth(auth))
         return {"tx": self._relay("checkin", f"checkin|{event_id}|{auth}", call, event_id,
                                   _hex(messages.key_id(_bytes(qx), _bytes(qy))))}
 
     def delegate(self, agent: str, agent_id: int, cap: int, expiry: int, qx: str, qy: str, deadline: int,
                  auth: str) -> dict:
         x, y = _bytes(qx), _bytes(qy)
-        call = self.chain.treasury.functions.delegate(x, y, Web3.to_checksum_address(agent), agent_id, cap, expiry,
+        call = self.chain.treasury.functions.delegate(x, y, self._agent(agent), agent_id, cap, expiry,
                                                       deadline, _auth(auth))
         tx = self._relay("delegate", f"delegate|{auth}", call, key_id=_hex(messages.key_id(x, y)))
-        if agent_id != messages.NO_AGENT_ID and cap > 0:
+        if (agent_id != messages.NO_AGENT_ID or self._svm) and cap > 0:
             self.db.execute("INSERT OR IGNORE INTO agents(agent_id, agent, first_seen) VALUES (?,?,?)",
-                            (str(agent_id), Web3.to_checksum_address(agent), time.time()))
+                            (self._board_id(agent, agent_id), self._agent(agent), time.time()))
         return {"tx": tx}
+
+    def grant_pass(self, agent: str, agent_id: int, cap: int, expiry: int, rules: tuple[int, int, int, int], qx: str,
+                   qy: str, deadline: int, auth: str) -> dict:
+        """An Agent Pass: cap and expiry plus rules (categories, late-fee ceiling, active bookings, lead days)."""
+        x, y = _bytes(qx), _bytes(qy)
+        call = self.chain.treasury.functions.grantPass(x, y, self._agent(agent), agent_id, cap, expiry,
+                                                       rules, deadline, _auth(auth))
+        tx = self._relay("delegate", f"pass|{auth}", call, key_id=_hex(messages.key_id(x, y)))
+        if (agent_id != messages.NO_AGENT_ID or self._svm) and cap > 0:
+            self.db.execute("INSERT OR IGNORE INTO agents(agent_id, agent, first_seen) VALUES (?,?,?)",
+                            (self._board_id(agent, agent_id), self._agent(agent), time.time()))
+        return {"tx": tx}
+
+    def dashboard(self, key_id: str) -> dict:
+        """The organizer's one screen: seats filled, refilled from the waitlist, released, and money recovered."""
+        _bytes(key_id)
+        rows = self.db.execute("SELECT * FROM events WHERE organizer=? ORDER BY id DESC", (key_id.lower(),)).fetchall()
+        events = [self._event(r, None) for r in rows]
+        keys = ["capacity", "committed", "attended", "refilled", "released", "recovered", "waitlisted"]
+        per = [{"id": e["id"], "title": e["title"], "phase": e["phase"], "startsAt": e["startsAt"],
+                **{k: e[k] for k in keys},
+                "showRate": e["attended"] / e["committed"] if e["committed"] and e["phase"] in ("finalized", "awaiting_settlement") else None}
+               for e in events]
+        done = [e for e in per if e["showRate"] is not None]
+        totals = {k: sum(e[k] for e in per) for k in keys}
+        totals["events"] = len(per)
+        totals["showRate"] = (sum(e["attended"] for e in done) / sum(e["committed"] for e in done)) if done else None
+        return {"keyId": key_id, "events": per, "totals": totals}
+
+    def _board_id(self, agent: str, agent_id: int) -> str:
+        """The show-up board's key: the ERC-8004 id on Monad, the agent's own key on Solana."""
+        return self._agent(agent) if self._svm else str(agent_id)
 
     def agents(self) -> list[dict]:
         """Every agent an owner has bound a budget to, with the show-up reputation the treasury wrote for it."""
         rows = self.db.execute("SELECT * FROM agents ORDER BY first_seen DESC LIMIT 100").fetchall()
-        out = [{"agentId": int(r["agent_id"]), "agent": r["agent"], **self.chain.show_up(int(r["agent_id"]))} for r in rows]
+        out = [{"agentId": None if self._svm else int(r["agent_id"]), "agent": r["agent"],
+                **self.chain.show_up(r["agent_id"] if self._svm else int(r["agent_id"]))} for r in rows]
         return sorted(out, key=lambda a: (-(a["count"]), -(a["showUpRate"] or 0)))
 
     def agent_info(self, agent: str, agent_id: int | None = None) -> dict:
         """What an agent needs to sign its next commit, and (with its ERC-8004 id) its show-up reputation."""
         ident, rep = self.chain.registries
-        return {"agent": Web3.to_checksum_address(agent), "nonce": self.chain.agent_nonce(agent),
+        return {"agent": self._agent(agent), "nonce": self.chain.agent_nonce(agent), "vm": getattr(self.chain, "vm", "evm"),
                 "chainId": self.chain.chain_id, "treasury": self.chain.treasury.address, "now": self.chain.now(),
                 "rpc": self.public_rpc, "identityRegistry": ident, "reputationRegistry": rep,
-                "reputation": self.chain.show_up(agent_id) if agent_id is not None else None}
+                "reputation": (self.chain.show_up(self._agent(agent)) if self._svm
+                               else self.chain.show_up(agent_id) if agent_id is not None else None)}
 
     def agent_card(self, agent: str, base_url: str) -> dict:
         """The ERC-8004 registration file an ANZEN agent points its identity at."""
@@ -266,14 +344,14 @@ class Anzen:
                 "description": "Finds creator events and reserves places for its owner within a budget the owner "
                                "signed on their phone. It cannot check in: presence is the owner's.",
                 "services": [{"name": "anzen", "endpoint": base_url}],
-                "registrations": [{"agentRegistry": f"eip155:{self.chain.chain_id}:{self.chain.registries[0]}"}],
-                "supportedTrust": ["reputation"], "wallet": Web3.to_checksum_address(agent)}
+                "registrations": [{"agentRegistry": f"{self._network}:{self.chain.registries[0] or self.chain.treasury.address}"}],
+                "supportedTrust": ["reputation"], "wallet": self._agent(agent)}
 
     def agent_gas(self, agent: str) -> dict:
         """Testnet only: a little MON so a new agent can register its own ERC-8004 identity. Once per agent."""
         if self.chain.chain_id in MAINNETS:
             raise AnzenError(Reason.FAUCET_DISABLED)
-        addr = Web3.to_checksum_address(agent)
+        addr = self._agent(agent)
         try:
             with self.db:
                 self.db.execute("INSERT INTO faucet(key_id, created_at) VALUES (?,?)", ("gas:" + addr.lower(), time.time()))
@@ -284,8 +362,49 @@ class Anzen:
         return {"tx": tx, "amount": AGENT_GAS_WEI}
 
     def commit_by_agent(self, event_id: int, key_id: str, deadline: int, agent_sig: str) -> dict:
-        call = self.chain.treasury.functions.commitByAgent(event_id, _bytes(key_id), deadline, _bytes(agent_sig, 65))
+        call = self.chain.treasury.functions.commitByAgent(event_id, _bytes(key_id), deadline, _bytes(agent_sig, 64 if self._svm else 65))
         return {"tx": self._relay("agent_commit", f"agent_commit|{event_id}|{agent_sig}", call, event_id, key_id)}
+
+    # ---------------------------------------------------------------- x402
+
+    def x402_requirements(self, event_id: int, resource: str) -> dict:
+        """HTTP 402 body: what an agent must sign to reserve this event from its owner's Agent Pass."""
+        e = self.event(event_id)
+        c = self.chain
+        return {"x402Version": 1, "error": "X-PAYMENT header is required", "accepts": [{
+            "scheme": "anzen-pass", "network": self._network, "maxAmountRequired": str(e["amount"]),
+            "resource": resource, "mimeType": "application/json", "payTo": c.treasury.address,
+            "asset": c.token.address, "maxTimeoutSeconds": 600,
+            "description": f"Refundable commitment for {e['title']}, paid from the owner's Agent Pass. "
+                           "It comes back when the owner checks in at the venue.",
+            "extra": {"eventId": event_id, "amount": e["amount"], "chainId": c.chain_id,
+                      "treasury": c.treasury.address, "now": c.now(), "waitlist": e["committed"] >= e["capacity"],
+                      "sign": "EIP-191 personal_sign of keccak256(abi.encode(bytes32('ANZEN/agentcommit/v1'), "
+                              "chainId, treasury, eventId, ownerKeyId, amount, agentNonce, deadline)); agentNonce "
+                              "from GET /agents/{agent}",
+                      "payload": {"keyId": "owner's account key id", "deadline": "unix seconds",
+                                  "signature": "0x… 65 bytes"}},
+        }]}
+
+    def x402_pay(self, event_id: int, header: str) -> tuple[dict, str]:
+        """Settles an X-PAYMENT header by relaying commitByAgent and waiting for the receipt. Returns the response
+        body and the X-PAYMENT-RESPONSE header value."""
+        try:
+            pay = json.loads(base64.b64decode(header))
+            p = pay["payload"]
+            if pay.get("scheme") != "anzen-pass":
+                raise ValueError("scheme")
+            key_id, deadline, sig = p["keyId"], int(p["deadline"]), p["signature"]
+        except (ValueError, KeyError, TypeError):
+            raise AnzenError(Reason.INVALID_SIGNATURE, "malformed X-PAYMENT") from None
+        tx = self.commit_by_agent(event_id, key_id, deadline, sig)["tx"]
+        ok = self.chain.wait(tx, timeout=60)["status"] == 1
+        status = self.tx(tx)["status"]
+        me = self.event(event_id, key_id)["me"] if ok else None
+        result = {"success": ok, "transaction": tx, "network": self._network, "payer": key_id}
+        body = {"ok": ok, "tx": tx, "txStatus": status, "eventId": event_id,
+                "reservation": me["status"] if me else None, "explorer": self._explorer(tx)}
+        return body, base64.b64encode(json.dumps(result).encode()).decode()
 
     def settle(self, event_id: int, key_id: str) -> dict:
         """Finalizes the event if nobody has yet (waiting for it), then settles this participant."""
@@ -312,6 +431,9 @@ class Anzen:
             raise AnzenError(Reason.FAUCET_USED) from None
         try:
             c, me = self.chain, self.chain.relayer.address
+            if self._svm:
+                tx = self._relay("faucet", f"faucet|{key_id}", c.faucet_deposit(kid, self.faucet_amount), key_id=key_id)
+                return {"tx": tx, "amount": self.faucet_amount}
             if c.token.functions.allowance(me, c.treasury.address).call() < self.faucet_amount:
                 c.wait(c.send(c.token.functions.approve(c.treasury.address, 2**256 - 1)))
             c.wait(c.send(c.token.functions.mint(me, self.faucet_amount)))
@@ -366,9 +488,7 @@ class Anzen:
             raise AnzenError(Reason.WRONG_PHASE, e["phase"])
         challenge = secrets.token_bytes(32)
         expires_at = min(now + CHALLENGE_TTL, e["checkInEnd"])
-        digest = messages.challenge_hash(self.chain.chain_id, self.chain.treasury.address, event_id, challenge,
-                                         expires_at)
-        sig = _hex(self.chain.sign_challenge(digest))
+        sig = _hex(self.chain.sign_challenge(event_id, challenge, expires_at))
         return {"eventId": event_id, "challenge": _hex(challenge), "expiresAt": expires_at, "issuerSig": sig,
                 "uri": f"anzen://checkin?e={event_id}&c={_hex(challenge)}&x={expires_at}&s={sig}"}
 

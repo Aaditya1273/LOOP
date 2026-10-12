@@ -113,6 +113,7 @@ fun HomeScreen(vm: AppViewModel, go: (String) -> Unit, onExplore: () -> Unit) {
 
             // 2. Balance, with the faucet only where the network allows it.
             item { Gap(12); BalanceCard(acct.balance, symbol, s.health?.faucet == true && !acct.faucetUsed, vm) }
+            item { Gap(12); ShowUpScoreCard(acct) }
 
             acct.delegation?.takeIf { it.active }?.let { d ->
                 item {
@@ -130,13 +131,13 @@ fun HomeScreen(vm: AppViewModel, go: (String) -> Unit, onExplore: () -> Unit) {
                 }
             }
 
-            val upcoming = acct.commitments.filter { it.me?.status != "settled" && !it.cancelled }
+            val upcoming = acct.commitments.filter { it.me?.status !in setOf("settled", "released") && !it.cancelled }
             if (upcoming.isNotEmpty()) {
                 item { SectionHeader("Your commitments") }
                 items(upcoming, key = { "c${it.id}" }) { e -> EventCard(e, symbol, Modifier.padding(bottom = Spacing.s)) { go("event/${e.id}") } }
             }
             if (acct.organized.isNotEmpty()) {
-                item { SectionHeader("Events you organize") }
+                item { SectionHeader("Events you organize") { QuietButton("Dashboard") { go("dashboard") } } }
                 items(acct.organized, key = { "o${it.id}" }) { e -> EventCard(e, symbol, Modifier.padding(bottom = Spacing.s)) { go("event/${e.id}") } }
             }
             val outcomes = acct.commitments.filter { it.me?.status == "settled" }

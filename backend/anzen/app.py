@@ -44,28 +44,57 @@ class Config(BaseModel):
     noShow: int = Field(ge=0, le=1)
 
 
+class Terms(BaseModel):
+    category: int = Field(ge=0, le=31)
+    lateFeeBps: int = Field(ge=0, le=10_000)
+
+
 class CreateEvent(WithDeadline):
     policy: str = Field(max_length=10_000, description="the exact document whose sha256 is policyHash")
     config: Config
+    terms: Terms | None = Field(None, description="present: signed as create/v2 (createEventWithTerms)")
+
+
+class Key(BaseModel):
+    qx: str = Field(pattern=HEX32)
+    qy: str = Field(pattern=HEX32)
+    auth: str = Field(pattern=r"^0x[0-9a-fA-F]{128,8192}$")
+
+
+class StaffCheckIn(BaseModel):
+    guest: Key
+    issuedAt: int = Field(gt=0, lt=2**64)
+    staff: Key
+
+
+class Rules(BaseModel):
+    categories: int = Field(ge=0, lt=2**32)
+    maxLateFeeBps: int = Field(ge=0, lt=2**16)
+    maxActive: int = Field(ge=0, lt=2**8)
+    maxLeadDays: int = Field(ge=0, lt=2**16)
 
 
 class CheckIn(Signed):
     challenge: str = Field(pattern=HEX32)
     expiresAt: int
-    issuerSig: str = Field(pattern=r"^0x[0-9a-fA-F]{130}$")
+    issuerSig: str = Field(pattern=r"^0x[0-9a-fA-F]{128}([0-9a-fA-F]{2})?$")  # ed25519 (Solana) or EIP-191
 
 
 class Delegate(WithDeadline):
-    agent: str = Field(pattern=r"^0x[0-9a-fA-F]{40}$")
+    agent: str = Field(pattern=r"^0x([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")  # EVM address or Solana ed25519 key
     agentId: int = Field(ge=0, lt=2**256, description="ERC-8004 agentId, or 2**256-1 for none")
     cap: int = Field(ge=0, lt=2**128)
     expiry: int = Field(ge=0, lt=2**64)
 
 
+class Pass(Delegate):
+    rules: Rules
+
+
 class AgentCommit(BaseModel):
     keyId: str = Field(pattern=HEX32)
     deadline: int = Field(gt=0)
-    agentSig: str = Field(pattern=r"^0x[0-9a-fA-F]{130}$")
+    agentSig: str = Field(pattern=r"^0x[0-9a-fA-F]{128}([0-9a-fA-F]{2})?$")
 
 
 class KeyBody(BaseModel):
@@ -73,7 +102,11 @@ class KeyBody(BaseModel):
 
 
 def build_service(s: Settings) -> Anzen:
-    chain = Chain(s.rpc_url, s.treasury, s.token, s.relayer_key, s.issuer_key)
+    if s.program_id:
+        from .solana_chain import SolanaChain
+        chain = SolanaChain(s.rpc_url, s.program_id, s.token, s.chain_id, s.relayer_key, s.issuer_key)
+    else:
+        chain = Chain(s.rpc_url, s.treasury, s.token, s.relayer_key, s.issuer_key)
     return Anzen(store.connect(s.db_path), chain, faucet_amount=s.faucet_amount, public_rpc=s.public_rpc)
 
 
@@ -81,7 +114,8 @@ def create_app(svc: Anzen | None = None) -> FastAPI:
     svc = svc or build_service(Settings.from_env())
     app = FastAPI(title="ANZEN service", version="0.3.0")
     # The web app runs on another origin. No cookies or credentials exist: every write is a signed action.
-    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"], allow_headers=["Content-Type"])
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"], allow_headers=["Content-Type", "X-PAYMENT"],
+                       expose_headers=["X-PAYMENT-RESPONSE"])
 
     @app.exception_handler(AnzenError)
     async def anzen_error(_: Request, e: AnzenError):
@@ -109,7 +143,36 @@ def create_app(svc: Anzen | None = None) -> FastAPI:
         c = b.config
         cfg = EventConfig(bytes.fromhex(c.organizer[2:]), bytes.fromhex(c.policyHash[2:]), c.issuer, c.amount,
                           c.capacity, c.commitDeadline, c.checkInStart, c.checkInEnd, c.noShow)
-        return svc.create_event(b.policy, cfg, b.qx, b.qy, b.deadline, b.auth)
+        terms = (b.terms.category, b.terms.lateFeeBps) if b.terms else None
+        return svc.create_event(b.policy, cfg, b.qx, b.qy, b.deadline, b.auth, terms)
+
+    @app.post("/events/{event_id}/release")
+    def release(event_id: int, b: WithDeadline):
+        return svc.release(event_id, b.qx, b.qy, b.deadline, b.auth)
+
+    @app.post("/events/{event_id}/staff-checkin")
+    def staff_check_in(event_id: int, b: StaffCheckIn):
+        return svc.staff_check_in(event_id, b.guest.qx, b.guest.qy, b.issuedAt, b.guest.auth, b.staff.qx, b.staff.qy,
+                                  b.staff.auth)
+
+    @app.post("/pass")
+    def grant_pass(b: Pass):
+        r = b.rules
+        return svc.grant_pass(b.agent, b.agentId, b.cap, b.expiry, (r.categories, r.maxLateFeeBps, r.maxActive, r.maxLeadDays),
+                              b.qx, b.qy, b.deadline, b.auth)
+
+    @app.get("/organizers/{key_id}/dashboard")
+    def dashboard(key_id: str):
+        return svc.dashboard(key_id)
+
+    @app.api_route("/x402/events/{event_id}/reserve", methods=["GET", "POST"])
+    def x402_reserve(event_id: int, request: Request):
+        """x402: without X-PAYMENT, 402 + what to sign; with it, the reservation is relayed and confirmed."""
+        header = request.headers.get("x-payment")
+        if not header:
+            return JSONResponse(status_code=402, content=svc.x402_requirements(event_id, str(request.url)))
+        body, receipt = svc.x402_pay(event_id, header)
+        return JSONResponse(status_code=200 if body["ok"] else 409, content=body, headers={"X-PAYMENT-RESPONSE": receipt})
 
     @app.post("/events/{event_id}/commit")
     def commit(event_id: int, b: WithDeadline):

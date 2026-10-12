@@ -29,6 +29,24 @@ class MessagesTest {
         assertEquals("18c0fcdd83456a3a8cbc13e0d31c678f844edfb511bcf20d15541c85ee05e3e4", h(Messages.create(10143, t, 3, 1_800_000_600, terms)))
     }
 
+    private val cfg get() = Messages.EventTerms(Messages.keyId(qx, qy), Messages.sha256("policy".toByteArray()), issuer,
+        10_000_000, 20, 1_800_086_400, 1_800_172_800, 1_800_183_600, 1)
+
+    @Test fun createV2() = assertEquals("532166810d76b6c89fc99c75c68a1f1d615f0e8c359d54ad0da98e9dabd68d5e",
+        h(Messages.createV2(10143, t, 3, 1_800_000_600, cfg, 1, 2000)))
+
+    @Test fun grantPass() = assertEquals("b64e4b0a1e07c8e3dd202df1fa5e6aaae09556ce69195e1440e34025877cd888",
+        h(Messages.grantPass(10143, t, issuer, BigInteger.valueOf(7), 20_000_000, 1_800_604_800, Messages.PassRules(6, 1000, 2, 7), 6, 1_800_000_600)))
+
+    @Test fun release() = assertEquals("cd7cb7cae83abcf6e043551f107b92354780c8a7f166d981884f8072f4df3bd6",
+        h(Messages.release(10143, t, 7, 5, 1_800_000_600)))
+
+    @Test fun present() = assertEquals("437f254f2caaf77565fb8b1d3ac2ff942a6b1e0f50518c955cc564b966b9d590",
+        h(Messages.present(10143, t, 7, 1_800_172_845)))
+
+    @Test fun staff() = assertEquals("a9f55ee9ff83aacad83b8e254b20fa2bacdbe1be9a2475139db4b2aa44c2632e",
+        h(Messages.staff(10143, t, 7, Messages.keyId(qx, qy), 1_800_172_845)))
+
     @Test fun commit() = assertEquals("d7a0febc16a64dd5461c4d7bdb9804bde3796ce86bcec11ad8780a54c03c27c5",
         h(Messages.commit(10143, t, 7, 10_000_000, 4, 1_800_000_600)))
 
@@ -52,7 +70,7 @@ class MessagesTest {
         assertEquals("""{"version":1,"title":"Rooftop","description":"","creator":"Mira","venue":"Studio 4","startsAt":1800180000,""" +
             """"timezone":"Asia/Kolkata","artwork":2,"disputeContact":"hi@example.com","amount":10000000,"capacity":20,""" +
             """"commitDeadline":1800086400,"checkInStart":1800172800,"checkInEnd":1800183600,"noShow":"split",""" +
-            """"issuer":"$issuer"}""", DraftRules.policy(d, issuer))
+            """"issuer":"$issuer","category":0,"lateFeeBps":0}""", DraftRules.policy(d, issuer))
     }
 
     @Test fun derToLowS() {
@@ -66,6 +84,21 @@ class MessagesTest {
         assertEquals(r, BigInteger(1, rr))
         assertEquals(BigInteger.valueOf(5), BigInteger(1, ss)) // n - s
         assertTrue(BigInteger(1, ss) <= n.shiftRight(1))
+    }
+
+    /** Solana: a 32-byte key fills an address slot with its first 20 bytes, so it signs as that 20-byte address. */
+    @Test fun solanaKeyInAddressSlot() {
+        val key32 = "0x" + issuer.removePrefix("0x") + "ab".repeat(12)
+        assertArrayEquals(Messages.delegate(103, t, issuer, BigInteger.ONE, 5, 6, 7, 8), Messages.delegate(103, t, key32, BigInteger.ONE, 5, 6, 7, 8))
+        assertArrayEquals(Messages.address(issuer), Messages.address(key32))
+    }
+
+    @Test fun solanaExplorerTemplate() {
+        val h = com.anzen.core.Health(103, "Solana devnet", "https://explorer.solana.com/tx/{tx}?cluster=devnet", t, t, t, t, true, true,
+            com.anzen.core.Asset("tUSD", 6, "Test dollar"), 0, vm = "svm")
+        assertEquals("https://explorer.solana.com/tx/abc?cluster=devnet", h.txLink("abc"))
+        assertEquals("https://x/tx/abc", h.copy(explorer = "https://x/tx/").txLink("abc"))
+        assertTrue(h.solana)
     }
 
     @Test fun hex() = assertArrayEquals(byteArrayOf(0x0a, 0xff.toByte()), "0x0aFF".hexToBytes())

@@ -444,15 +444,33 @@ Agent:  Found a table at 8pm, but it has a $200 cancellation fee.
 - Confirmed-only money UI (*authorizing → submitting → pending → confirmed*)
 - Tests: 33 contract tests, a fork test against real ERC-8004 registries, 14 service tests, 22 Android unit tests, browser passkey tests, 11 on-device journeys
 
-### 🚧 Building (this competition)
+### ✅ Built (this competition, Solana)
 
-- Port to **Solana** (`anzen_core` program, SIMD-0075 passkey verification)
-- **Agent Pass guardrails** (categories, cancellation-fee ceiling, booking caps)
-- **x402** commitment payments for agents
-- **Auto-refill** waitlist with agent claims
-- **Silver tier** check-in (venue scans guest)
-- Show-Up Score, streaks and streak shields
-- Venue dashboard (seats refilled, revenue recovered)
+- **`anzen_core` Solana program** ([`programs/anzen_core`](programs/anzen_core)), Anchor. Passkeys verified onchain through the
+  **secp256r1 precompile (SIMD-0075)**: a browser WebAuthn assertion or an Android Keystore signature, checked by
+  instruction introspection. No wallet, no seed phrase, no SOL for users: a relayer pays fees and rent and can't
+  alter what a key signed. Venue codes and agents are checked by the ed25519 precompile.
+- **Agent Pass guardrails**: cap, expiry, categories, late-fee ceiling, active bookings and lead time, all bound by
+  one passkey signature and enforced by the program on every booking.
+- **x402** reservations: `GET /x402/events/{id}/reserve` answers `402 Payment Required` with what to sign; the agent
+  retries with `X-PAYMENT` and the commitment is paid from its owner's Agent Pass.
+- **Auto-refill**: a full event takes a waitlist with the money held; when someone gives their place back, the first
+  person waiting gets the seat in the same transaction.
+- **Give-back**: free before the commit deadline (earns a streak shield); after it, the published late fee goes to the
+  host unless the waitlist refills the seat.
+- **Silver tier** check-in: staff scan the guest's own 45-second passkey code and the host's key countersigns.
+- **Show-Up Score**, streaks, best streak and streak shields, kept onchain per passkey; agents' show-up records written
+  only by the settle instruction.
+- **Venue dashboard**: seats filled, refilled from the waitlist, given back, money recovered, show rate.
+- Web and Android apps for all of it, with the same signed messages on both chains.
+- Tests: the full lifecycle on a local Solana validator with the real program (WebAuthn through secp256r1, waitlist,
+  give-back, staff check-in, Agent Pass + x402, settlement, records); 40 contract tests for the same rules on the
+  Monad build; 18 service tests; 33 Android unit tests; browser passkey e2e.
+
+### 🚧 Building
+
+- Devnet deployment of `anzen_core` and the hosted app switched to it (the program and setup scripts are ready:
+  `scripts/deploy_solana.sh`)
 - Pilot with a real venue
 
 ### 🗺️ Roadmap
@@ -484,15 +502,16 @@ Prototype contracts (Monad testnet): treasury [`0xb8775046…5d8f`](https://test
 ### Repository
 
 ```
-contracts/  v1 treasury (+ tests, fork test vs real ERC-8004), test dollar
-backend/    relayer, presence challenges, policy store, agent gateway, MCP server
+programs/   anzen_core: the Solana program (Anchor)
+contracts/  the Monad build of the same rules (+ tests, fork test vs real ERC-8004), test dollar
+backend/    relayer for both chains, presence challenges, policy store, x402 + agent gateway, MCP server
 web/        browser app (passkeys)
 app/        Android app (Kotlin/Compose, Keystore keys, CameraX)
 skills/     OpenClaw skill
 docs/       SPEC.md: full protocol design
 ```
 
-The `anzen_core` Solana program will live in `programs/` once the port starts.
+Run it all locally on Solana: `scripts/solana_local.sh` (test validator + program + service + web on :8790).
 
 Build, run and test everything: **[BUILD.md](BUILD.md)**.
 
@@ -504,7 +523,10 @@ Build, run and test everything: **[BUILD.md](BUILD.md)**.
 - Prototype v1 uses a single presence issuer and a single relayer.
 - Bronze check-in proves a fresh code was signed with your passkey, not your exact location. Silver and Gold tiers address this.
 - Forfeit redistribution rules must be reviewed against local consumer and promotion law in each market before launch.
-- The Solana port, Arcium private scoring and hardware-attested check-ins are in progress (see [Status](#17-status-built-building-roadmap)).
+- Arcium private scoring, NFC / hardware-attested check-ins, squads and deposit waivers for high scores are roadmap,
+  not built (see [Status](#17-status-built-building-roadmap)).
+- On Solana, the 20-byte "address" slots in signed messages hold a key's first 20 bytes (so the web and Android
+  apps sign identical messages on both chains); the program checks the full key.
 
 ---
 

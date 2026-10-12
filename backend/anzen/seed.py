@@ -30,14 +30,17 @@ BASE = os.environ.get("ANZEN_URL", "http://127.0.0.1:8790")
 KEY_FILE = Path(__file__).resolve().parent.parent / ".dev" / "seed_organizer.pem"
 
 
-def http(method: str, path: str, body: dict | None = None) -> dict:
-    req = urllib.request.Request(BASE + path, method=method, headers={"Content-Type": "application/json"},
+def http(method: str, path: str, body: dict | None = None, headers: dict | None = None,
+         allow: tuple[int, ...] = ()) -> dict:
+    req = urllib.request.Request(BASE + path, method=method, headers={"Content-Type": "application/json", **(headers or {})},
                                  data=json.dumps(body).encode() if body is not None else None)
     for attempt in range(4):
         try:
-            with urllib.request.urlopen(req, timeout=60) as r:
+            with urllib.request.urlopen(req, timeout=90) as r:
                 return json.loads(r.read())
         except urllib.error.HTTPError as e:
+            if e.code in allow:
+                return json.loads(e.read())
             raise SystemExit(f"{method} {path} -> {e.code} {e.read().decode()}") from None
         except (urllib.error.URLError, TimeoutError, ConnectionError):
             # transient network failure; reads are safe to repeat, and every write is idempotent by signature
@@ -119,18 +122,22 @@ def publish(sample: tuple) -> int:
     now = h["now"]
     terms = {"amount": amount * 1_000_000, "capacity": cap, "commitDeadline": now + dl, "checkInStart": now + cs,
              "checkInEnd": now + ce, "noShow": ["organizer", "split"][no_show], "issuer": h["issuer"]}
+    category = 1 if "run" in title.lower() else 5 if "office" in title.lower() else 3  # fitness / learning / meetups
+    fee = 1000 if category == 1 else 0  # a 10% late give-back fee on the run, free elsewhere
     policy = json.dumps({"version": 1, "title": title, "description": desc, "creator": creator, "venue": venue,
                          "startsAt": now + cs + 1800, "timezone": "Asia/Kolkata", "artwork": art,
-                         "disputeContact": "organizer@example.com", **terms}, separators=(",", ":"))
+                         "disputeContact": "organizer@example.com", **terms, "category": category, "lateFeeBps": fee},
+                        separators=(",", ":"))
     cfg = messages.EventConfig(org, hashlib.sha256(policy.encode()).digest(), h["issuer"], terms["amount"], cap,
                                terms["commitDeadline"], terms["checkInStart"], terms["checkInEnd"], no_show)
     nonce = http("GET", "/accounts/0x" + org.hex())["nonce"]
     deadline = now + 600
-    sig = sign(sk, messages.create(h["chainId"], h["treasury"], nonce, deadline, cfg))
+    sig = sign(sk, messages.create_v2(h["chainId"], h["treasury"], nonce, deadline, cfg, category, fee))
     config = {"organizer": "0x" + org.hex(), "policyHash": "0x" + cfg.policy_hash.hex(), "issuer": cfg.issuer,
               **{k: terms[k] for k in ("amount", "capacity", "commitDeadline", "checkInStart", "checkInEnd")},
               "noShow": no_show}
-    tx = http("POST", "/events", {"policy": policy, "config": config, "deadline": deadline, **sig})["tx"]
+    tx = http("POST", "/events", {"policy": policy, "config": config, "deadline": deadline, **sig,
+                                  "terms": {"category": category, "lateFeeBps": fee}})["tx"]
     return wait(tx)["eventId"]
 
 

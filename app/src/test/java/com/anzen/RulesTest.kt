@@ -9,7 +9,10 @@ import com.anzen.core.Links
 import com.anzen.core.Me
 import com.anzen.core.NextAction
 import com.anzen.core.Outcome
+import com.anzen.core.PresenceCode
 import com.anzen.core.VenueCode
+import com.anzen.core.canRelease
+import com.anzen.core.releaseTerms
 import com.anzen.core.mostUrgent
 import com.anzen.core.nextAction
 import com.anzen.core.outcome
@@ -24,14 +27,15 @@ class RulesTest {
 
     private fun event(phase: String = "open", status: String = "none", attended: Boolean = false, settled: Long = 0,
                       passport: Long = 0, committed: Int = 1, capacity: Int = 20, cancelled: Boolean = false,
-                      checkInStart: Long = now + 7200, id: Long = 1) = Event(
+                      checkInStart: Long = now + 7200, id: Long = 1, waitlisted: Int = 0, lateFeeBps: Int = 0,
+                      eventNow: Long = now) = Event(
         id = id, title = "Rooftop", description = "", creator = "Mira", venue = "Studio 4", startsAt = now + 9000,
         timezone = "UTC", artwork = 0, disputeContact = "x", organizer = "0x" + "11".repeat(32),
         policyHash = "0x" + "22".repeat(32), policyVerified = true, issuer = "0x" + "33".repeat(20), amount = 10_000_000,
         capacity = capacity, commitDeadline = now + 3600, checkInStart = checkInStart, checkInEnd = checkInStart + 3600,
         noShow = "split", committed = committed, attended = 0, cancelled = cancelled, finalized = phase == "finalized",
-        attendeePayout = 0, phase = phase, now = now, createTx = "0x" + "44".repeat(32),
-        me = Me(status, attended, if (attended) now else 0, settled, passport))
+        attendeePayout = 0, phase = phase, now = eventNow, createTx = "0x" + "44".repeat(32),
+        me = Me(status, attended, if (attended) now else 0, settled, passport), waitlisted = waitlisted, lateFeeBps = lateFeeBps)
 
     private val code = "anzen://checkin?e=7&c=0x${"ab".repeat(32)}&x=1800000045&s=0x${"cd".repeat(65)}"
 
@@ -72,7 +76,11 @@ class RulesTest {
 
     @Test fun nextActionFollowsPhaseAndStatus() {
         assertEquals(NextAction.Commit, nextAction(event()))
-        assertEquals(NextAction.Full, nextAction(event(committed = 20)))
+        assertEquals(NextAction.Commit, nextAction(event(committed = 20))) // full: joins the waitlist
+        assertEquals(NextAction.Full, nextAction(event(committed = 20, waitlisted = 20))) // waitlist full too
+        assertEquals(NextAction.Waitlisted, nextAction(event(committed = 20, status = "waitlisted")))
+        assertEquals(NextAction.Settle, nextAction(event(phase = "awaiting_settlement", status = "waitlisted")))
+        assertEquals(NextAction.Released, nextAction(event(status = "released")))
         assertEquals(NextAction.Closed, nextAction(event(phase = "closed")))
         assertEquals(NextAction.WaitForCheckIn, nextAction(event(phase = "closed", status = "committed")))
         assertEquals(NextAction.CheckIn, nextAction(event(phase = "check_in", status = "committed")))
@@ -92,7 +100,42 @@ class RulesTest {
         assertEquals(Outcome.CancelledRefundPending, outcome(event(phase = "cancelled", status = "committed", cancelled = true)))
         assertEquals(Outcome.Refunded, outcome(event(phase = "cancelled", status = "settled", cancelled = true, settled = 10_000_000)))
         assertEquals(Outcome.NotParticipating, outcome(event()))
+        assertEquals(Outcome.WaitlistRefunded, outcome(event(phase = "finalized", status = "settled", settled = 10_000_000)))
+        assertEquals(Outcome.Released, outcome(event(status = "released")))
     }
+
+    @Test fun releaseTermsFollowTheContract() {
+        val inTime = releaseTerms(event(status = "committed", lateFeeBps = 2000))
+        assertEquals(10_000_000L, inTime.refund); assertEquals(0L, inTime.fee); assertTrue(inTime.inTime)
+        val late = releaseTerms(event(status = "committed", lateFeeBps = 2000, eventNow = now + 3601))
+        assertEquals(8_000_000L, late.refund); assertEquals(2_000_000L, late.fee)
+        val waiting = releaseTerms(event(status = "waitlisted", lateFeeBps = 2000, eventNow = now + 3601))
+        assertEquals(10_000_000L, waiting.refund) // leaving the waitlist is always free, and earns no shield
+        assertTrue(!waiting.inTime)
+        assertTrue(canRelease(event(status = "committed")))
+        assertTrue(!canRelease(event(status = "committed", eventNow = now + 7200))) // check-in open
+        assertTrue(!canRelease(event(status = "checked_in")))
+    }
+
+    @Test fun parsesPresenceCode() {
+        val x = "0x" + "01".repeat(32); val y = "0x" + "02".repeat(32); val a = "0x" + "ab".repeat(64)
+        val c = PresenceCode(7, x, y, 1_800_000_000, a)
+        assertEquals(c, PresenceCode.parse(c.uri))
+        assertNull(PresenceCode.parse("anzen://present?e=7&x=0x12&y=$y&t=1&a=$a"))
+        assertNull(PresenceCode.parse(code))
+    }
+
+    @Test fun routesSolanaAgentLinks() {
+        val agent = "0x" + "5e".repeat(32)
+        assertEquals("agent?agent=$agent&cap=20&days=7", Links.route("anzen://delegate?agent=$agent&cap=20&days=7"))
+        assertNull(Links.route("anzen://delegate?agent=0x${"5e".repeat(31)}&cap=20"))
+        // ed25519 issuer signatures (64 bytes) are valid venue codes on Solana
+        assertNotNull(VenueCode.parse("anzen://checkin?e=7&c=0x${"ab".repeat(32)}&x=1800000045&s=0x${"cd".repeat(64)}"))
+    }
+
+    @Test fun routesPassLinks() = assertEquals(
+        "agent?agent=0x1c3c7d2915352282C0419F125580B288e58f6c17&cap=20&days=7&cats=6&fee=1000&active=2&lead=7",
+        Links.route("anzen://delegate?agent=0x1c3c7d2915352282C0419F125580B288e58f6c17&cap=20&days=7&cats=6&fee=1000&active=2&lead=7&fee2=x"))
 
     @Test fun mostUrgentPrefersCheckInThenSettlement() {
         val waiting = event(id = 1, phase = "closed", status = "committed", checkInStart = now + 100)

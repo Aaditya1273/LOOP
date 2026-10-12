@@ -17,10 +17,10 @@ withdraw, cancel, or raise its own budget: those need the owner's phone. Output 
 human line on stderr.
 """
 
+import base64
 import json
 import os
 import sys
-import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -35,13 +35,16 @@ KEYFILE = Path(os.environ.get("ANZEN_AGENT_KEYFILE", Path.home() / ".anzen" / "a
 DEFAULT_CAP = 20  # tUSD suggested in the approval link; the owner chooses the real cap
 
 
-def http(method: str, path: str, body: dict | None = None) -> dict | list:
-    req = urllib.request.Request(BASE + path, method=method, headers={"Content-Type": "application/json"},
+def http(method: str, path: str, body: dict | None = None, headers: dict | None = None,
+         allow: tuple[int, ...] = ()) -> dict | list:
+    req = urllib.request.Request(BASE + path, method=method, headers={"Content-Type": "application/json", **(headers or {})},
                                  data=json.dumps(body).encode() if body is not None else None)
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(req, timeout=90) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
+        if e.code in allow:
+            return json.loads(e.read())
         err = json.loads(e.read() or b"{}")
         out({"ok": False, "error": err.get("error", f"HTTP {e.code}"), "detail": err.get("detail", "")},
             f"refused: {err.get('error')}")
@@ -56,11 +59,34 @@ def out(data: dict, human: str) -> None:
     print(human, file=sys.stderr)
 
 
-def agent() -> Account:
+class Agent:
+    """This agent's key. The same 32-byte secret is an EVM key on Monad and an ed25519 seed on Solana."""
+
+    def __init__(self, secret: str):
+        self.secret = secret
+        self.svm = http("GET", "/health").get("vm") == "svm"
+        if self.svm:
+            from solders.keypair import Keypair
+            self.kp = Keypair.from_seed(bytes.fromhex(secret.removeprefix("0x")))
+            self.address = "0x" + bytes(self.kp.pubkey()).hex()
+        else:
+            self.acct = Account.from_key(secret)
+            self.address = self.acct.address
+
+    def sign_commit(self, chain_id: int, treasury: str, event_id: int, key_id: str, amount: int, nonce: int,
+                    deadline: int) -> str:
+        args = (chain_id, treasury, event_id, bytes.fromhex(key_id[2:]), amount, nonce, deadline)
+        if self.svm:  # ed25519 over the preimage, checked by Solana's ed25519 precompile
+            return "0x" + bytes(self.kp.sign_message(messages.agent_commit(*args))).hex()
+        digest = messages.agent_commit_hash(*args)
+        return "0x" + Account.sign_message(encode_defunct(primitive=digest), self.acct.key).signature.hex().removeprefix("0x")
+
+
+def agent() -> Agent:
     if not KEYFILE.exists():
         out({"ok": False, "error": "NoAgentKey"}, "run `init` first")
         sys.exit(1)
-    return Account.from_key(KEYFILE.read_text().strip())
+    return Agent(KEYFILE.read_text().strip())
 
 
 def owner() -> str:
@@ -78,11 +104,12 @@ def agent_id() -> int | None:
     return int(IDFILE.read_text()) if IDFILE.exists() else None
 
 
-def register_identity(a) -> int | None:
-    """Mints this agent's ERC-8004 identity in the official registry (its own transaction, its own key)."""
+def register_identity(a: Agent) -> int | None:
+    """Mints this agent's ERC-8004 identity in the official registry (its own transaction, its own key). On Solana
+    there is no ERC-8004: the agent's key is its identity and the program keeps its show-up record."""
     from web3 import Web3
     info = http("GET", f"/agents/{a.address}")
-    if not info.get("identityRegistry"):
+    if a.svm or not info.get("identityRegistry"):
         return None  # no ERC-8004 on this network
     w3 = Web3(Web3.HTTPProvider(info["rpc"]))
     if w3.eth.get_balance(a.address) == 0:
@@ -99,7 +126,7 @@ def register_identity(a) -> int | None:
     tx = call.build_transaction({"from": a.address, "nonce": w3.eth.get_transaction_count(a.address),
                                  "gas": int(call.estimate_gas({"from": a.address}) * 1.15),
                                  "maxFeePerGas": fee, "maxPriorityFeePerGas": min(fee, 2 * 10**9)})
-    receipt = w3.eth.wait_for_transaction_receipt(w3.eth.send_raw_transaction(a.sign_transaction(tx).raw_transaction))
+    receipt = w3.eth.wait_for_transaction_receipt(w3.eth.send_raw_transaction(a.acct.sign_transaction(tx).raw_transaction))
     from web3.logs import DISCARD
     return reg.events.Registered().process_receipt(receipt, errors=DISCARD)[0]["args"]["agentId"]
 
@@ -136,7 +163,8 @@ def cmd_budget() -> None:
     mine = d["agent"].lower() == agent().address.lower()
     remaining = d["remaining"] if mine else 0
     out({"ok": True, "active": d["active"] and mine, "remaining": remaining, "cap": d["cap"] if mine else 0,
-         "expiry": d["expiry"] if mine else 0, "ownerBalance": acct["balance"]},
+         "expiry": d["expiry"] if mine else 0, "ownerBalance": acct["balance"],
+         "rules": d["rules"] if mine else None, "activeBookings": d["activeBookings"] if mine else 0},
         f"budget left: {remaining / 1e6:g} tUSD" + ("" if d["active"] and mine else " (no active budget for this agent)"))
 
 
@@ -144,29 +172,32 @@ def cmd_events(query: str) -> None:
     rows = http("GET", f"/events?q={urllib.request.quote(query)}&key={owner()}")
     open_ = [{"id": e["id"], "title": e["title"], "creator": e["creator"], "venue": e["venue"],
               "startsAt": e["startsAt"], "commitDeadline": e["commitDeadline"], "amount": e["amount"],
-              "seatsLeft": e["capacity"] - e["committed"], "alreadyReserved": e["me"]["status"] != "none"}
-             for e in rows if e["phase"] == "open" and e["committed"] < e["capacity"] and e["policyVerified"]]
+              "seatsLeft": e["capacity"] - e["committed"], "waitlist": e["committed"] >= e["capacity"],
+              "category": e["categoryName"], "lateFeeBps": e["lateFeeBps"],
+              "alreadyReserved": e["me"]["status"] not in ("none", "released")}
+             for e in rows if e["phase"] == "open" and e["policyVerified"]]
     out({"ok": True, "events": open_}, f"{len(open_)} open events")
 
 
 def cmd_reserve(event_id: int) -> None:
+    """x402: ask for the resource, get 402 + what to pay, sign it from the owner's Agent Pass, retry with X-PAYMENT."""
     a, key_id = agent(), owner()
-    e = http("GET", f"/events/{event_id}?key={key_id}")
-    info = http("GET", f"/agents/{a.address}")
-    deadline = info["now"] + 600
-    digest = messages.agent_commit_hash(info["chainId"], info["treasury"], event_id, bytes.fromhex(key_id[2:]),
-                                        e["amount"], info["nonce"], deadline)
-    sig = "0x" + Account.sign_message(encode_defunct(primitive=digest), a.key).signature.hex().removeprefix("0x")
-    tx = http("POST", f"/events/{event_id}/agent-commit", {"keyId": key_id, "deadline": deadline, "agentSig": sig})["tx"]
-    for _ in range(90):
-        s = http("GET", f"/tx/{tx}")
-        if s["status"] != "submitted":
-            break
-        time.sleep(0.7)
-    ok = s["status"] == "confirmed"
-    out({"ok": ok, "tx": tx, "status": s["status"], "eventId": event_id, "amount": e["amount"]},
-        (f"reserved “{e['title']}” for {e['amount'] / 1e6:g} tUSD. The owner must check in in person."
-         if ok else f"transaction {s['status']}: {tx}"))
+    path = f"/x402/events/{event_id}/reserve"
+    req = http("GET", path, allow=(402,))["accepts"][0]
+    x = req["extra"]
+    nonce = http("GET", f"/agents/{a.address}")["nonce"]
+    deadline = x["now"] + 600
+    sig = a.sign_commit(x["chainId"], x["treasury"], event_id, key_id, x["amount"], nonce, deadline)
+    payment = {"x402Version": 1, "scheme": req["scheme"], "network": req["network"],
+               "payload": {"keyId": key_id, "deadline": deadline, "signature": sig}}
+    r = http("GET", path, headers={"X-PAYMENT": base64.b64encode(json.dumps(payment).encode()).decode()}, allow=(409,))
+    held = r.get("reservation")
+    out({"ok": r["ok"], "tx": r["tx"], "status": r["txStatus"], "reservation": held, "eventId": event_id,
+         "amount": x["amount"]},
+        (f"on the waitlist with {x['amount'] / 1e6:g} tUSD held: the seat is theirs if someone releases one"
+         if held == "waitlisted" else
+         f"reserved for {x['amount'] / 1e6:g} tUSD. The owner must check in in person.") if r["ok"]
+        else f"transaction {r['txStatus']}: {r['tx']}")
 
 
 if __name__ == "__main__":

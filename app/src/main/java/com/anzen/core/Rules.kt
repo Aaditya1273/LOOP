@@ -16,7 +16,7 @@ import java.util.Locale
 data class VenueCode(val eventId: Long, val challenge: String, val expiresAt: Long, val issuerSig: String) {
     companion object {
         private val HEX32 = Regex("^0x[0-9a-fA-F]{64}$")
-        private val HEX65 = Regex("^0x[0-9a-fA-F]{130}$")
+        private val HEX65 = Regex("^0x[0-9a-fA-F]{128}([0-9a-fA-F]{2})?$") // ed25519 (64 B, Solana) or EIP-191 (65 B)
 
         /** Null for anything that isn't a well-formed ANZEN venue code. */
         fun parse(raw: String): VenueCode? = runCatching {
@@ -29,22 +29,78 @@ data class VenueCode(val eventId: Long, val challenge: String, val expiresAt: Lo
     }
 }
 
+/**
+ * A guest's staff-scanned check-in code (silver tier): their key signed `present(eventId, issuedAt)`; the organizer's
+ * desk countersigns it. Same URI on web and Android: anzen://present?e=&x=&y=&t=&a=
+ */
+data class PresenceCode(val eventId: Long, val qx: String, val qy: String, val issuedAt: Long, val auth: String) {
+    val uri get() = "anzen://present?e=$eventId&x=$qx&y=$qy&t=$issuedAt&a=$auth"
+    val keyId get() = Messages.keyId(qx.hexToBytes(), qy.hexToBytes())
+
+    companion object {
+        const val VALID_SECONDS = 45L
+        private val HEX32 = Regex("^0x[0-9a-fA-F]{64}$")
+        private val AUTH = Regex("^0x[0-9a-fA-F]{128,8192}$")
+
+        fun parse(raw: String): PresenceCode? = runCatching {
+            val uri = URI(raw.trim())
+            if (uri.scheme != "anzen" || uri.host != "present") return null
+            val q = uri.rawQuery.split("&").associate { it.substringBefore("=") to it.substringAfter("=") }
+            PresenceCode(q.getValue("e").toLong(), q.getValue("x"), q.getValue("y"), q.getValue("t").toLong(), q.getValue("a"))
+                .takeIf { HEX32.matches(it.qx) && HEX32.matches(it.qy) && AUTH.matches(it.auth) && it.eventId > 0 }
+        }.getOrNull()
+    }
+}
+
+// ------------------------------------------------------------------ categories and fees
+
+object Categories {
+    val names = listOf("Other", "Fitness", "Dining", "Meetups", "Health", "Learning")
+    fun name(i: Int) = names.getOrElse(i) { "Other" }
+    /** Bitmask (as the contract reads it) -> "Fitness, Dining"; 0 means any. */
+    fun describe(mask: Long) = if (mask == 0L) "Any" else names.indices.filter { mask and (1L shl it) != 0L }.joinToString { names[it] }
+}
+
+/** "20%" / "None" for a fee in basis points. */
+fun feeText(bps: Int) = if (bps <= 0) "None" else "${"%.4g".format(Locale.US, bps / 100.0).trimEnd('0').trimEnd('.')}%"
+
+/** What giving the place back returns now, by the contract's rules (the waitlist may still waive the fee). */
+data class ReleaseTerms(val refund: Long, val fee: Long, val inTime: Boolean)
+
+fun releaseTerms(e: Event): ReleaseTerms {
+    if (e.me?.status == "waitlisted" || e.now <= e.commitDeadline) return ReleaseTerms(e.amount, 0, e.me?.status != "waitlisted")
+    val fee = e.amount * e.lateFeeBps / 10_000
+    return ReleaseTerms(e.amount - fee, fee, false)
+}
+
+/** Whether the owner can still give their place back (or leave the waitlist). */
+fun canRelease(e: Event) = !e.cancelled && e.now < e.checkInStart && e.me?.status in setOf("committed", "waitlisted")
+
+/** Perks per README §7: 90+ no deposits, 70-89 reduced, below 70 standard. */
+fun scoreTier(score: Int) = when {
+    score >= 90 -> "No deposits · priority waitlist · partner perks"
+    score >= 70 -> "Reduced deposits · standard waitlist"
+    else -> "Standard deposits · rebuild by showing up"
+}
+
 // ------------------------------------------------------------------ what the user can do next
 
-enum class NextAction { Commit, Full, Closed, WaitForCheckIn, CheckIn, Missed, Settle, ViewResult, RefundAvailable, Cancelled }
+enum class NextAction { Commit, Full, Closed, WaitForCheckIn, CheckIn, Missed, Settle, ViewResult, RefundAvailable, Cancelled, Waitlisted, Released }
 
 /** The single primary action for an event, from onchain phase + this account's participation. */
 fun nextAction(e: Event): NextAction {
     val status = e.me?.status ?: "none"
     return when {
         status == "settled" -> NextAction.ViewResult
+        status == "released" -> NextAction.Released
         e.cancelled -> if (status == "none") NextAction.Cancelled else NextAction.RefundAvailable
         status == "none" -> when {
             e.phase != "open" -> NextAction.Closed
-            e.committed >= e.capacity -> NextAction.Full
-            else -> NextAction.Commit
+            e.committed >= e.capacity && e.waitlisted >= e.capacity -> NextAction.Full
+            else -> NextAction.Commit // a full event takes commitments onto its waitlist
         }
         e.phase == "awaiting_settlement" || e.phase == "finalized" -> NextAction.Settle
+        status == "waitlisted" -> NextAction.Waitlisted
         status == "committed" && e.phase == "check_in" -> NextAction.CheckIn
         status == "committed" -> NextAction.WaitForCheckIn
         else -> NextAction.WaitForCheckIn // checked in, waiting for check-in to close
@@ -60,14 +116,16 @@ fun mostUrgent(commitments: List<Event>): Event? {
 
 // ------------------------------------------------------------------ settlement outcome
 
-enum class Outcome { Returned, Rewarded, NoShowApplied, CancelledRefundPending, Refunded, AwaitingSettlement, InProgress, NotParticipating }
+enum class Outcome { Returned, Rewarded, NoShowApplied, CancelledRefundPending, Refunded, AwaitingSettlement, InProgress, NotParticipating, Released, WaitlistRefunded }
 
 fun outcome(e: Event): Outcome {
     val me = e.me ?: return Outcome.NotParticipating
     return when {
         me.status == "none" -> Outcome.NotParticipating
+        me.status == "released" -> Outcome.Released
         me.status == "settled" && e.cancelled -> Outcome.Refunded
         me.status == "settled" && me.attended -> if (me.settledAmount > e.amount) Outcome.Rewarded else Outcome.Returned
+        me.status == "settled" && me.settledAmount > 0 -> Outcome.WaitlistRefunded // waited, never got a seat
         me.status == "settled" -> Outcome.NoShowApplied
         e.cancelled -> Outcome.CancelledRefundPending
         e.phase == "awaiting_settlement" || e.phase == "finalized" -> Outcome.AwaitingSettlement
@@ -112,6 +170,8 @@ data class EventDraft(
     val capacity: String = "20",
     val noShow: Int = 1,
     val disputeContact: String = "",
+    val category: Int = 0,
+    val lateFeeBps: Int = 0,
 )
 
 object DraftRules {
@@ -142,7 +202,10 @@ object DraftRules {
                 if (cap == null || cap !in 1..10_000) add("Capacity must be between 1 and 10,000.")
             }
             3 -> if (d.disputeContact.isBlank()) add("Add a contact for disputes.")
-            4 -> if (d.noShow !in 0..1) add("Choose what happens to a no-show's commitment.")
+            4 -> {
+                if (d.noShow !in 0..1) add("Choose what happens to a no-show's commitment.")
+                if (d.lateFeeBps !in 0..10_000) add("The late-release fee must be between 0% and 100%.")
+            }
             5 -> (0..4).forEach { addAll(problems(d, it, now)) }
         }
     }
@@ -159,7 +222,7 @@ object DraftRules {
         venue = d.venue.trim(), startsAt = d.startsAt, timezone = d.timezone, artwork = d.artwork,
         disputeContact = d.disputeContact.trim(), amount = amountBase(d.amountUnits)!!, capacity = d.capacity.toInt(),
         commitDeadline = d.commitDeadline, checkInStart = d.checkInStart, checkInEnd = d.checkInEnd,
-        noShow = if (d.noShow == 1) "split" else "organizer", issuer = issuer,
+        noShow = if (d.noShow == 1) "split" else "organizer", issuer = issuer, category = d.category, lateFeeBps = d.lateFeeBps,
     ))
 
     @Serializable
@@ -167,7 +230,7 @@ object DraftRules {
         val version: Int, val title: String, val description: String, val creator: String, val venue: String,
         val startsAt: Long, val timezone: String, val artwork: Int, val disputeContact: String, val amount: Long,
         val capacity: Int, val commitDeadline: Long, val checkInStart: Long, val checkInEnd: Long, val noShow: String,
-        val issuer: String,
+        val issuer: String, val category: Int, val lateFeeBps: Int,
     )
 }
 
@@ -239,6 +302,12 @@ object ErrorCopy {
         "NotDelegated" -> "Your agent has no active budget. Approve one in Profile > AI agent."
         "BudgetExceeded" -> "That would go over the budget you gave your agent."
         "AuthUnavailable" -> "Authorization isn't available. Check the phone's screen lock."
+        "CategoryNotAllowed" -> "Your agent's pass doesn't cover this kind of event."
+        "FeeAboveLimit" -> "This event's late-release fee is above what your agent's pass allows."
+        "TooManyActive" -> "Your agent already holds as many active bookings as its pass allows."
+        "TooFarAhead" -> "This event is further ahead than your agent's pass allows."
+        "InvalidPresence" -> "That isn't an ANZEN guest code."
+        "PresenceExpired" -> "That guest code has expired. Ask the guest to show a fresh one."
         else -> "Something went wrong ($reason)."
     }
 }
@@ -247,7 +316,7 @@ object ErrorCopy {
 
 object Links {
     private val KEY = Regex("^0x[0-9a-fA-F]{64}$")
-    private val ADDRESS = Regex("^0x[0-9a-fA-F]{40}$")
+    private val ADDRESS = Regex("^0x([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$") // EVM address or Solana agent key
 
     /** anzen:// link -> app route, or null if it isn't one the app understands. */
     fun route(link: String): String? = runCatching {
@@ -262,7 +331,14 @@ object Links {
                 val cap = q["cap"]?.toLongOrNull()?.coerceIn(1, 1000) ?: 20
                 val days = q["days"]?.toIntOrNull()?.coerceIn(1, 30) ?: 7
                 val id = q["id"]?.toLongOrNull()?.takeIf { it >= 0 }
-                if (ADDRESS.matches(agent)) "agent?agent=$agent&cap=$cap&days=$days" + (id?.let { "&id=$it" } ?: "") else null
+                // Agent Pass rules (optional): category bitmask, max late fee (bps), active bookings, lead days.
+                val rules = listOfNotNull(
+                    q["cats"]?.toLongOrNull()?.takeIf { it in 0..63 }?.let { "cats=$it" },
+                    q["fee"]?.toIntOrNull()?.takeIf { it in 0..10_000 }?.let { "fee=$it" },
+                    q["active"]?.toIntOrNull()?.takeIf { it in 0..255 }?.let { "active=$it" },
+                    q["lead"]?.toIntOrNull()?.takeIf { it in 0..365 }?.let { "lead=$it" },
+                ).joinToString("") { "&$it" }
+                if (ADDRESS.matches(agent)) "agent?agent=$agent&cap=$cap&days=$days" + (id?.let { "&id=$it" } ?: "") + rules else null
             }
             "proof" -> {
                 val e = q.getValue("e").toLong()

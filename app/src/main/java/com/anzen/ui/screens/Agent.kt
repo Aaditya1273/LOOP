@@ -14,7 +14,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.anzen.core.Categories
 import com.anzen.core.Format
+import com.anzen.core.Messages
+import com.anzen.core.feeText
 import com.anzen.core.TxState
 import com.anzen.ui.ActionViewModel
 import com.anzen.ui.AppViewModel
@@ -41,7 +44,8 @@ import com.anzen.ui.theme.Spacing
 import com.anzen.ui.theme.rememberHaptics
 
 private const val ZERO = "0x0000000000000000000000000000000000000000"
-private val ADDRESS = Regex("^0x[0-9a-fA-F]{40}$")
+/** An EVM address, or a Solana (ed25519) agent key as 0x + 64 hex. */
+private val ADDRESS = Regex("^0x([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
 
 /**
  * The AI agent's budget. Money can be delegated; presence cannot: the agent may reserve places with this
@@ -49,7 +53,8 @@ private val ADDRESS = Regex("^0x[0-9a-fA-F]{40}$")
  * anzen://delegate link (which pre-fills the request; the owner decides the real cap).
  */
 @Composable
-fun AgentScreen(agentArg: String?, capArg: Long?, daysArg: Int?, agentIdArg: Long?, vm: AppViewModel, back: () -> Unit) {
+fun AgentScreen(agentArg: String?, capArg: Long?, daysArg: Int?, agentIdArg: Long?, rules: Messages.PassRules?, vm: AppViewModel,
+                back: () -> Unit) {
     val c = Anzen.colors
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -88,10 +93,18 @@ fun AgentScreen(agentArg: String?, capArg: Long?, daysArg: Int?, agentIdArg: Lon
             Gap(12)
             Panel {
                 InfoRow("Agent", Format.shortHex(d.agent), mono = true, copy = d.agent)
-                d.agentId?.let { InfoRow("ERC-8004 identity", "#$it") }
+                if (s.health?.solana != true) d.agentId?.let { InfoRow("ERC-8004 identity", "#$it") }
+                d.rules?.let { r ->
+                    InfoRow("Kinds of event", Categories.describe(r.categories))
+                    InfoRow("Late fee it may accept", if (r.maxLateFeeBps >= 10_000) "Any" else "Up to ${feeText(r.maxLateFeeBps)}")
+                    InfoRow("Active bookings", if (r.maxActive == 0) "${d.activeBookings} · no limit" else "${d.activeBookings} of ${r.maxActive}")
+                    if (r.maxLeadDays > 0) InfoRow("Books at most", "${r.maxLeadDays} days ahead")
+                }
                 d.reputation?.let { r ->
                     InfoRow("Show-up reputation", r.showUpRate?.let { "${"%.0f".format(it)}% of ${r.count}" } ?: "No settled reservations yet")
-                    Text("Only feedback written by the ANZEN treasury counts: each point is a real commitment and a " +
+                    Text(if (s.health?.solana == true) "Written only by the ANZEN program when a reservation settles: each point is a " +
+                        "real commitment and a verified check-in, so it can't be farmed by fake reviewers."
+                        else "Only feedback written by the ANZEN treasury counts: each point is a real commitment and a " +
                         "verified check-in, so it can't be farmed by fake reviewers.", style = AnzenType.caption, color = c.textSecondary)
                 }
             }
@@ -107,8 +120,21 @@ fun AgentScreen(agentArg: String?, capArg: Long?, daysArg: Int?, agentIdArg: Lon
             InfoRow("Cancel or withdraw", "Never", valueColor = c.statusFailed)
             InfoRow("Raise its own budget", "Never", valueColor = c.statusFailed)
             Gap(4)
-            Text("The treasury contract enforces this. If the agent misbehaves, the worst case is reservations up to " +
+            Text("${(s.health?.contractName ?: "The treasury contract").replaceFirstChar(Char::uppercase)} enforces this. If the agent misbehaves, the worst case is reservations up to " +
                 "the cap, which you get back by checking in.", style = AnzenType.caption, color = c.textSecondary)
+        }
+
+        rules?.let { r ->
+            SectionHeader("Agent Pass rules it asked for")
+            Panel {
+                InfoRow("Kinds of event", Categories.describe(r.categories))
+                InfoRow("Late give-back fee", if (r.maxLateFeeBps >= 10_000) "Any" else "Up to ${feeText(r.maxLateFeeBps)}")
+                InfoRow("Active bookings at once", if (r.maxActive == 0) "No limit" else "${r.maxActive}")
+                InfoRow("How far ahead", if (r.maxLeadDays == 0) "No limit" else "${r.maxLeadDays} days")
+                Gap(4)
+                Text("${(s.health?.contractName ?: "The treasury").replaceFirstChar(Char::uppercase)} checks every rule when the agent books. Your one authorization binds the budget and these rules.",
+                    style = AnzenType.caption, color = c.textSecondary)
+            }
         }
 
         SectionHeader(if (d?.active == true) "Change budget" else "Approve a budget")
@@ -126,7 +152,10 @@ fun AgentScreen(agentArg: String?, capArg: Long?, daysArg: Int?, agentIdArg: Lon
                 PrimaryButton("Approve ${capBase?.let { Format.amount(it) } ?: "—"} $symbol for $days day" + if (days > 1) "s" else "",
                     enabled = ADDRESS.matches(agent) && capBase != null && s.health != null) {
                     val id = (agentIdArg ?: d?.agentId?.takeIf { d.agent.equals(agent, true) })?.toBigInteger() ?: com.anzen.core.Messages.NO_AGENT_ID
-                    ctx.activity()?.let { a -> action.run { delegate(a, agent, id, capBase!!, now + days * 86_400L, it) } }
+                    val expiry = now + days * 86_400L
+                    ctx.activity()?.let { a -> action.run {
+                        if (rules != null) grantPass(a, agent, id, capBase!!, expiry, rules, it) else delegate(a, agent, id, capBase!!, expiry, it)
+                    } }
                 }
                 if (d?.active == true) {
                     Gap(8)

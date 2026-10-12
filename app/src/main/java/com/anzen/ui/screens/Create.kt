@@ -44,7 +44,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.anzen.core.Categories
 import com.anzen.core.DraftRules
+import com.anzen.core.feeText
 import com.anzen.core.EventDraft
 import com.anzen.core.Format
 import com.anzen.core.TxState
@@ -67,6 +69,7 @@ import com.anzen.ui.components.Panel
 import com.anzen.ui.components.PrimaryButton
 import com.anzen.ui.components.SecondaryButton
 import com.anzen.ui.components.SectionHeader
+import com.anzen.ui.components.Segmented
 import com.anzen.ui.components.Tone
 import com.anzen.ui.components.TopBar
 import com.anzen.ui.components.TxProgress
@@ -167,6 +170,11 @@ private fun Basics(d: EventDraft, update: (EventDraft) -> Unit) {
     Field("Creator name", d.creator, { update(d.copy(creator = it.take(60))) })
     Gap(12)
     Field("Description", d.description, { update(d.copy(description = it.take(2000))) }, singleLine = false, minLines = 4)
+    SectionHeader("Kind of event")
+    // Agents carry a pass that lists the kinds they may book, so this decides which agents can reserve here.
+    Segmented(listOf(1, 2, 3), d.category, { Categories.name(it) }) { update(d.copy(category = it)) }
+    Gap(8)
+    Segmented(listOf(4, 5, 0), d.category, { Categories.name(it) }) { update(d.copy(category = it)) }
     SectionHeader("Artwork")
     Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
         repeat(ARTWORK_COUNT) { i ->
@@ -267,6 +275,11 @@ private fun Settlement(d: EventDraft, update: (EventDraft) -> Unit) {
     Gap(8)
     ChoiceRow("It goes to the organizer", "Attendees get exactly their commitment back. No-shows' commitments go to you.",
         d.noShow == 0) { update(d.copy(noShow = 0)) }
+    SectionHeader("If someone gives their place back late")
+    Text("Before commitments close it's always free. After that, until check-in opens, you keep this share unless the " +
+        "waitlist refills the seat at once.", style = AnzenType.callout, color = Anzen.colors.textSecondary)
+    Gap(8)
+    Segmented(listOf(0, 1000, 2500, 5000), d.lateFeeBps, { feeText(it) }) { update(d.copy(lateFeeBps = it)) }
     SectionHeader("Always")
     Panel {
         InfoRow("Attendees", "Commitment back + passport")
@@ -291,6 +304,9 @@ private fun Review(d: EventDraft, network: String?, symbol: String, problems: Li
         InfoRow("Commitments close", if (d.commitDeadline > 0) Format.dateTime(d.commitDeadline) else "—")
         InfoRow("Check-in", if (d.checkInStart > 0) "${Format.dateTime(d.checkInStart)} – ${Format.time(d.checkInEnd)}" else "—")
         InfoRow("No-shows", if (d.noShow == 1) "Shared among attendees" else "To organizer")
+        InfoRow("Kind", Categories.name(d.category))
+        InfoRow("Late give-back fee", feeText(d.lateFeeBps))
+        InfoRow("When full", "Waitlist, refilled automatically")
         InfoRow("Disputes", d.disputeContact)
         InfoRow("Network fee", "None for you")
     }

@@ -90,6 +90,23 @@ GEMINI_API_KEY=… ANZEN_OWNER=0x… scripts/agent_demo.sh "find me something th
 ANZEN_OWNER=0x… claude                       # Claude Code picks up .mcp.json: tools setup/events/reserve/budget/reputation
 ```
 
+## Solana
+
+The `anzen_core` program (`programs/anzen_core`, Anchor 0.32) carries the same rules as the Monad contract. Toolchain:
+Agave 4.x (`solana`, `solana-test-validator`, `cargo-build-sbf`) and rustup in `~/.cargo/bin`.
+
+```
+cd programs/anzen_core && cargo-build-sbf          # → target/deploy/anzen_core.so (~420 KB)
+cd backend && uv run pytest tests/test_solana.py  # full lifecycle on a local validator with the real program (~1 min)
+scripts/solana_local.sh                            # validator + program + service + web on :8790 (chain id 104)
+scripts/deploy_solana.sh                           # devnet: deploy/upgrade the program, set up mint + config once
+ANZEN_URL=… uv run python -m anzen.smoke           # live run: publish, waitlist, x402 agent, give-back, check-in, settle
+```
+
+The service picks the chain from its deployment file: `contracts/deployments/solana-<chain id>.json` (103 = devnet)
+means Solana, `<chain id>.json` means EVM. Same HTTP API and the same signed messages on both; on Solana an
+"address" slot holds a key's first 20 bytes.
+
 ## Deploy
 
 - **Live events for judging:** `ANZEN_URL=https://anzen-shonko.vercel.app uv run python -m anzen.seed showcase`

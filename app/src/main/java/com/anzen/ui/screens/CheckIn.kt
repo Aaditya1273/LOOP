@@ -50,9 +50,11 @@ import com.anzen.core.Desk
 import com.anzen.core.ErrorCopy
 import com.anzen.core.Format
 import com.anzen.core.Links
+import com.anzen.core.PresenceCode
 import com.anzen.core.Repository
 import com.anzen.core.TxState
 import com.anzen.core.VenueCode
+import com.anzen.core.toHex
 import com.anzen.ui.ActionViewModel
 import com.anzen.ui.AppViewModel
 import com.anzen.ui.activity
@@ -218,6 +220,8 @@ fun CheckInScreen(id: Long, codeArg: String?, vm: AppViewModel, back: () -> Unit
                     Text("Scan the code shown at the venue's check-in desk.", style = AnzenType.body, color = c.textSecondary)
                     Gap(16)
                     PrimaryButton("Scan venue code", accent = true) { go("scan") }
+                    Gap(8)
+                    SecondaryButton("Staff are scanning? Show my code") { go("present/${e.id}") }
                 }
                 code.eventId != e.id -> {
                     InfoNote(ErrorCopy.of("CodeForOtherEvent"), Tone.Failed)
@@ -254,7 +258,7 @@ fun CheckInScreen(id: Long, codeArg: String?, vm: AppViewModel, back: () -> Unit
 }
 
 @Composable
-private fun CheckedIn(title: String, tx: String, onDone: () -> Unit) {
+private fun CheckedIn(title: String, tx: String?, onDone: () -> Unit) {
     val c = Anzen.colors
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         com.anzen.ui.components.Mascot(com.anzen.ui.components.Panda.Success, Modifier.height(160.dp))
@@ -266,7 +270,7 @@ private fun CheckedIn(title: String, tx: String, onDone: () -> Unit) {
         Text("The treasury recorded your check-in for $title. Your outcome is applied after check-in closes.",
             style = AnzenType.callout, color = c.textSecondary, textAlign = TextAlign.Center)
         Gap(12)
-        InfoRow("Transaction", Format.shortHex(tx, 10, 8), mono = true, copy = tx)
+        if (tx != null) InfoRow("Transaction", Format.shortHex(tx, 10, 8), mono = true, copy = tx)
         Gap(16)
         PrimaryButton("Done", onClick = onDone)
     }
@@ -277,7 +281,7 @@ private fun CheckedIn(title: String, tx: String, onDone: () -> Unit) {
  * ~35 s (each valid 45 s), with live check-in counts from the contract. Keeps the screen on.
  */
 @Composable
-fun DeskScreen(id: Long, vm: AppViewModel, back: () -> Unit) {
+fun DeskScreen(id: Long, vm: AppViewModel, back: () -> Unit, go: (String) -> Unit) {
     val c = Anzen.colors
     val ctx = LocalContext.current
     val toast = LocalToast.current
@@ -312,6 +316,10 @@ fun DeskScreen(id: Long, vm: AppViewModel, back: () -> Unit) {
     Pushed("Check-in desk", back) {
         Loaded(r, { version++ }) { e ->
             LargeTitle(e.title, Modifier.padding(vertical = Spacing.m), subtitle = "${e.attended} of ${e.committed} checked in")
+            if (e.organizer == vm.repo.keyId && e.phase == "check_in") {
+                SecondaryButton("Scan guests' codes instead") { go("staffscan/${e.id}") }
+                Gap(16)
+            }
             when {
                 e.organizer != vm.repo.keyId -> InfoNote(ErrorCopy.of("NotOrganizer"), Tone.Failed)
                 desk == null -> {
@@ -349,6 +357,135 @@ fun DeskScreen(id: Long, vm: AppViewModel, back: () -> Unit) {
                     "Check-in has closed.", Tone.Pending)
                 problem != null -> InfoNote(ErrorCopy.of(problem!!), Tone.Failed)
                 else -> com.anzen.ui.components.LoadingState("Getting a code")
+            }
+        }
+    }
+}
+
+/**
+ * Silver tier, guest side: this phone signs a fresh code (valid 45 s) for venue staff to scan. Each code needs your
+ * authorization, so a new one is made when you ask, not silently in the background.
+ */
+@Composable
+fun PresentScreen(id: Long, vm: AppViewModel, back: () -> Unit) {
+    val c = Anzen.colors
+    val ctx = LocalContext.current
+    val view = LocalView.current
+    DisposableEffect(Unit) { view.keepScreenOn = true; onDispose { view.keepScreenOn = false } }
+    var version by remember { mutableIntStateOf(0) }
+    val r = rememberEvent(id, vm, version)
+    var code by remember { mutableStateOf<PresenceCode?>(null) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    var signing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    // While a code is up, re-read the contract so the screen turns into "checked in" the moment staff submit it.
+    LaunchedEffect(code) { while (code != null) { delay(3000); version++ } }
+
+    Pushed("Your check-in code", back) {
+        Loaded(r, { version++ }) { e ->
+            val skew = remember(e.id) { e.now - System.currentTimeMillis() / 1000 }
+            var now by remember { mutableLongStateOf(System.currentTimeMillis() / 1000 + skew) }
+            LaunchedEffect(Unit) { while (true) { delay(1000); now = System.currentTimeMillis() / 1000 + skew } }
+            LargeTitle(e.title, Modifier.padding(vertical = Spacing.m), subtitle = e.venue)
+            when {
+                e.me?.attended == true -> CheckedIn(e.title, null) { back() }
+                e.me?.status != "committed" -> InfoNote("This account has no seat at this event, so there's nothing to check in.", Tone.Pending)
+                e.phase != "check_in" -> InfoNote(if (now < e.checkInStart) "Check-in opens ${Format.relative(e.checkInStart, now)}."
+                    else "Check-in has closed.", Tone.Pending)
+                else -> {
+                    val left = code?.let { it.issuedAt + PresenceCode.VALID_SECONDS - now } ?: 0
+                    if (code != null && left > 0) {
+                        Box(Modifier.fillMaxWidth().clip(Radius.large).background(Color.White).padding(Spacing.l), contentAlignment = Alignment.Center) {
+                            QrCode(code!!.uri, Modifier.fillMaxWidth().aspectRatio(1f), "Your check-in code for ${e.title}")
+                        }
+                        Gap(12)
+                        StatusPill("Valid for $left s", if (left > 10) Tone.Info else Tone.Pending)
+                        Gap(12)
+                        InfoNote("Show this to the venue's staff. Their desk countersigns it with the organizer's key. It works " +
+                            "once and only for 45 seconds.")
+                    } else {
+                        Text("Venue staff scan this code and countersign it on their device. Your phone signs it first.",
+                            style = AnzenType.body, color = c.textSecondary)
+                        Gap(16)
+                        problem?.let { InfoNote(ErrorCopy.of(it), Tone.Failed); Gap(12) }
+                        PrimaryButton(if (code == null) "Show my code" else "Show a fresh code", accent = true, loading = signing) {
+                            val a = ctx.activity() ?: return@PrimaryButton
+                            signing = true
+                            scope.launch {
+                                try { code = vm.repo.presenceCode(a, e); problem = null } catch (ex: CancellationException) { throw ex } catch (ex: Exception) {
+                                    problem = if (ex is com.anzen.core.AuthorizationCancelled) null else Repository.reasonOf(ex)
+                                }
+                                signing = false
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Silver tier, organizer side: scan a guest's code, countersign it with the organizer's key, submit. */
+@Composable
+fun StaffScanScreen(id: Long, vm: AppViewModel, back: () -> Unit) {
+    val c = Anzen.colors
+    val ctx = LocalContext.current
+    val haptics = rememberHaptics()
+    var version by remember { mutableIntStateOf(0) }
+    val r = rememberEvent(id, vm, version)
+    val action: ActionViewModel = hiltViewModel()
+    val tx by action.tx.collectAsStateWithLifecycle()
+    var guest by remember { mutableStateOf<PresenceCode?>(null) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    var granted by remember { mutableStateOf(ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
+    LaunchedEffect(Unit) { if (!granted) permission.launch(Manifest.permission.CAMERA) }
+    LaunchedEffect(tx) {
+        if (tx is TxState.Verified) { haptics.confirm(); version++ }
+        if (tx is TxState.Failed) haptics.reject()
+    }
+    Pushed("Scan guests", back) {
+        Loaded(r, { version++ }) { e ->
+            LargeTitle(e.title, Modifier.padding(vertical = Spacing.m), subtitle = "${e.attended} of ${e.committed} checked in")
+            fun accept(text: String) {
+                if (guest != null) return
+                val g = PresenceCode.parse(text)
+                val now = System.currentTimeMillis() / 1000 + (e.now - System.currentTimeMillis() / 1000)
+                problem = when {
+                    g == null -> "InvalidPresence"
+                    g.eventId != e.id -> "CodeForOtherEvent"
+                    g.issuedAt + PresenceCode.VALID_SECONDS < now -> "PresenceExpired"
+                    else -> null
+                }
+                if (problem != null) { haptics.reject(); return }
+                guest = g
+                ctx.activity()?.let { a -> action.run { staffCheckIn(a, e, g!!, it) } }
+            }
+            when {
+                e.organizer != vm.repo.keyId -> InfoNote(ErrorCopy.of("NotOrganizer"), Tone.Failed)
+                e.phase != "check_in" -> InfoNote("Guests can be checked in only while check-in is open.", Tone.Pending)
+                guest == null -> {
+                    Text("Scan the code on the guest's phone. You'll confirm each check-in with your own authorization.",
+                        style = AnzenType.body, color = c.textSecondary)
+                    Gap(16)
+                    Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(Radius.large).background(Color.Black), contentAlignment = Alignment.Center) {
+                        if (granted) QrCamera(onCode = ::accept)
+                        else Text("Camera access is off. Allow it in Settings.", style = AnzenType.callout, color = Color.White,
+                            textAlign = TextAlign.Center, modifier = Modifier.padding(Spacing.xl))
+                        Box(Modifier.size(220.dp).border(2.dp, Color.White.copy(alpha = 0.8f), Radius.medium))
+                    }
+                    Gap(12)
+                    problem?.let { InfoNote(ErrorCopy.of(it), Tone.Failed) }
+                }
+                else -> {
+                    Panel { InfoRow("Guest key", Format.shortHex(guest!!.keyId.toHex()), mono = true) }
+                    Gap(12)
+                    TxProgress(tx, "Guest checked in")
+                    if (tx is TxState.Verified || tx is TxState.Failed || tx is TxState.StillPending || tx is TxState.Cancelled) {
+                        Gap(12)
+                        PrimaryButton("Scan next guest") { guest = null; problem = null; action.reset() }
+                    }
+                }
             }
         }
     }

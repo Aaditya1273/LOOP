@@ -38,7 +38,8 @@ def test_full_lifecycle_split_forfeit(env):
     assert a["balance"] == 110_000_000  # stake back + bob's forfeited 10
     assert a["commitments"][0]["me"] == {"status": "settled", "attended": True,
                                          "checkedInAt": a["commitments"][0]["me"]["checkedInAt"],
-                                         "settledAmount": 20_000_000, "passportId": 1, "agentId": None}
+                                         "settledAmount": 20_000_000, "passportId": 1, "agentId": None,
+                                         "tier": 1, "byAgent": False}
     assert env.client.get(f"/accounts/{bob.id}").json()["balance"] == 90_000_000
 
     proof = env.client.get(f"/proof/{eid}/{alice.id}").json()
@@ -97,7 +98,10 @@ def test_insufficient_balance_and_capacity(env):
     env.fund(alice)
     env.fund(bob)
     env.confirm(env.commit(alice, eid).json()["tx"])
-    r = env.commit(bob, eid)
+    env.confirm(env.commit(bob, eid).json()["tx"])  # full: bob waits on the waitlist with his commitment held
+    assert env.client.get(f"/events/{eid}", params={"key": bob.id}).json()["me"]["status"] == "waitlisted"
+    env.fund(carol)
+    r = env.commit(carol, eid)  # the waitlist holds at most one person per seat
     assert r.json()["error"] == "EventFull"
     assert env.client.post("/faucet", json={"keyId": alice.id}).json()["error"] == "FaucetUsed"
 

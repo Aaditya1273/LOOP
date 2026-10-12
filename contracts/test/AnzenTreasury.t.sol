@@ -283,7 +283,185 @@ contract AnzenTreasuryTest is Test {
         _commit(id, carol, AnzenTreasury.InsufficientBalance.selector);
         _commit(id, alice);
         _commit(id, bob);
-        _commit(id, dave, AnzenTreasury.EventFull.selector);
+        _commit(id, dave); // full: dave's commitment waits on the waitlist (capped at one per seat)
+        assertEq(uint8(t.participation(id, dave.id).status), uint8(AnzenTreasury.Status.Waitlisted));
+        assertEq(t.balanceOf(dave.id), 40e6);
+        Key memory erin = _key(0xe5);
+        Key memory finn = _key(0xf6);
+        t.depositFor(erin.id, 50e6);
+        t.depositFor(finn.id, 50e6);
+        _commit(id, erin);
+        _commit(id, finn, AnzenTreasury.EventFull.selector);
+    }
+
+    // ---------------------------------------------------------------- v4: release, waitlist, staff, records, pass
+
+    function _release(uint256 id, Key memory k, bytes4 err) internal {
+        uint256 deadline = _now() + 600;
+        bytes memory sig =
+            _sign(k, abi.encode(bytes32("ANZEN/release/v1"), block.chainid, address(t), id, t.nonces(k.id), deadline));
+        _expect(err);
+        t.release(id, k.qx, k.qy, deadline, sig);
+    }
+
+    function _createWithTerms(uint8 category, uint16 lateFeeBps) internal returns (uint256) {
+        AnzenTreasury.EventConfig memory c = _config(AnzenTreasury.NoShow.ToOrganizer);
+        AnzenTreasury.EventTerms memory terms = AnzenTreasury.EventTerms(category, lateFeeBps);
+        uint256 deadline = _now() + 600;
+        bytes memory sig = _sign(
+            org, abi.encode(bytes32("ANZEN/create/v2"), block.chainid, address(t), t.nonces(org.id), deadline, c, terms)
+        );
+        return t.createEventWithTerms(c, terms, org.qx, org.qy, deadline, sig);
+    }
+
+    function test_releaseInTime_fullRefundAndShield() public {
+        uint256 id = _createWithTerms(1, 5000);
+        _commit(id, alice);
+        _release(id, alice, OK);
+        assertEq(t.balanceOf(alice.id), 100e6);
+        assertEq(uint8(t.participation(id, alice.id).status), uint8(AnzenTreasury.Status.Released));
+        (, , uint32 releasedInTime, , , uint32 shields) = t.recordOf(alice.id);
+        assertEq(releasedInTime, 1);
+        assertEq(shields, 1);
+        _commit(id, alice, AnzenTreasury.AlreadyCommitted.selector); // a released place isn't re-bookable by the same key
+        _release(id, alice, AnzenTreasury.NotCommitted.selector);
+    }
+
+    function test_lateRelease_paysPublishedFee() public {
+        uint256 id = _createWithTerms(1, 2000); // 20%
+        _commit(id, alice);
+        vm.warp(_now() + 1 days + 1); // past the commit deadline, before check-in
+        _release(id, alice, OK);
+        assertEq(t.balanceOf(alice.id), 98e6);
+        assertEq(t.balanceOf(org.id), 2e6);
+        (, AnzenTreasury.EventState memory st) = t.getEvent(id);
+        assertEq(st.recovered, 2e6);
+        vm.warp(_now() + 1 days);
+        _release(id, bob, AnzenTreasury.WrongPhase.selector); // check-in open: too late to release
+    }
+
+    function test_releaseRefillsFromWaitlist_noFee() public {
+        uint256 id = _createWithTerms(1, 2000);
+        Key memory dave = _key(0xd4);
+        t.depositFor(dave.id, 50e6);
+        _commit(id, alice);
+        _commit(id, bob);
+        _commit(id, dave); // waitlisted
+        vm.warp(_now() + 1 days + 1);
+        _release(id, alice, OK); // late, but the seat is refilled at once, so no fee
+        assertEq(t.balanceOf(alice.id), 100e6);
+        assertEq(uint8(t.participation(id, dave.id).status), uint8(AnzenTreasury.Status.Committed));
+        (, AnzenTreasury.EventState memory st) = t.getEvent(id);
+        assertEq(st.committed, 2);
+        assertEq(st.refilled, 1);
+        assertEq(st.waitlisted, 0);
+        vm.warp(_now() + 1 days);
+        _checkInNow(id, dave);
+        vm.warp(_now() + 4 hours);
+        t.finalize(id);
+        t.settle(id, dave.id);
+        assertEq(t.balanceOf(dave.id), 50e6);
+        assertEq(t.participation(id, dave.id).passportId, 1);
+    }
+
+    function test_waitlistedNeverPromoted_refundedAtSettlement() public {
+        uint256 id = _create(AnzenTreasury.NoShow.SplitAmongAttendees);
+        Key memory dave = _key(0xd4);
+        t.depositFor(dave.id, 50e6);
+        _commit(id, alice);
+        _commit(id, bob);
+        _commit(id, dave);
+        vm.warp(_now() + 2 days + 1);
+        _checkInNow(id, dave, AnzenTreasury.NotCommitted.selector); // no seat, no check-in
+        _checkInNow(id, alice);
+        vm.warp(_now() + 4 hours);
+        t.finalize(id);
+        t.settle(id, dave.id);
+        t.settle(id, alice.id);
+        assertEq(t.balanceOf(dave.id), 50e6); // whole commitment back
+        assertEq(t.balanceOf(alice.id), 110e6); // dave's held money is not part of the forfeit pool
+        (uint32 attended, uint32 missed, , , , ) = t.recordOf(dave.id);
+        assertEq(attended + missed, 0);
+    }
+
+    function _staffCheckIn(uint256 id, Key memory guest, Key memory staff, uint64 issuedAt, bytes4 err) internal {
+        bytes memory g = _sign(guest, abi.encode(bytes32("ANZEN/present/v1"), block.chainid, address(t), id, issuedAt));
+        bytes memory s =
+            _sign(staff, abi.encode(bytes32("ANZEN/staff/v1"), block.chainid, address(t), id, guest.id, issuedAt));
+        _expect(err);
+        t.checkInByStaff(id, guest.qx, guest.qy, issuedAt, g, staff.qx, staff.qy, s);
+    }
+
+    function test_staffCheckIn_silverTier() public {
+        uint256 id = _create(AnzenTreasury.NoShow.ToOrganizer);
+        _commit(id, alice);
+        _commit(id, bob);
+        vm.warp(_now() + 2 days + 1);
+        _staffCheckIn(id, alice, bob, uint64(_now()), AnzenTreasury.NotOrganizer.selector); // only the organizer's key
+        _staffCheckIn(id, alice, org, uint64(_now() - 46), AnzenTreasury.Expired.selector); // stale code
+        _staffCheckIn(id, alice, org, uint64(_now() - 10), OK);
+        assertEq(t.participation(id, alice.id).tier, 2);
+        _staffCheckIn(id, alice, org, uint64(_now()), AnzenTreasury.NotCommitted.selector); // once
+        _checkInNow(id, bob);
+        assertEq(t.participation(id, bob.id).tier, 1);
+    }
+
+    function test_records_streakShieldsAndScore() public {
+        assertEq(t.showUpScore(alice.id), 75); // no history
+        // attend once
+        uint256 a = _create(AnzenTreasury.NoShow.ToOrganizer);
+        _commit(a, alice);
+        // release another in time: earns a shield
+        uint256 b = _create(AnzenTreasury.NoShow.ToOrganizer);
+        _commit(b, alice);
+        _release(b, alice, OK);
+        uint256 c = _create(AnzenTreasury.NoShow.ToOrganizer);
+        _commit(c, alice);
+        vm.warp(_now() + 2 days + 1);
+        _checkInNow(a, alice);
+        vm.warp(_now() + 4 hours);
+        t.finalize(a);
+        t.finalize(c);
+        t.settle(a, alice.id);
+        t.settle(c, alice.id); // missed, but the shield keeps the streak
+        (uint32 attended, uint32 missed, uint32 inTime, uint32 streak, uint32 best, uint32 shields) = t.recordOf(alice.id);
+        assertEq(attended, 1);
+        assertEq(missed, 1);
+        assertEq(inTime, 1);
+        assertEq(streak, 1);
+        assertEq(best, 1);
+        assertEq(shields, 0);
+        assertEq(t.showUpScore(alice.id), (100 + 300) / uint256(6));
+    }
+
+    function _grant(Key memory owner, address agent, uint128 cap, AnzenTreasury.PassRules memory rules) internal {
+        uint256 deadline = _now() + 600;
+        uint64 expiry = uint64(_now() + 30 days);
+        bytes memory sig = _sign(
+            owner,
+            abi.encode(bytes32("ANZEN/pass/v1"), block.chainid, address(t), agent, t.NO_AGENT_ID(), cap, expiry, rules, t.nonces(owner.id), deadline)
+        );
+        t.grantPass(owner.qx, owner.qy, agent, t.NO_AGENT_ID(), cap, expiry, rules, deadline, sig);
+    }
+
+    function test_agentPassRules() public {
+        // fitness (1) and dining (2) only, late fee at most 10%, one active booking, at most 3 days ahead
+        _grant(alice, vm.addr(AGENT_PK), 100e6, AnzenTreasury.PassRules(uint32(1 << 1 | 1 << 2), 1000, 1, 3));
+        uint256 meetup = _createWithTerms(3, 0);
+        uint256 pricey = _createWithTerms(2, 5000);
+        uint256 spin = _createWithTerms(1, 1000);
+        uint256 dinner = _createWithTerms(2, 0);
+        _agentCommit(meetup, alice, AGENT_PK, AnzenTreasury.CategoryNotAllowed.selector);
+        _agentCommit(pricey, alice, AGENT_PK, AnzenTreasury.FeeAboveLimit.selector);
+        _agentCommit(spin, alice, AGENT_PK, OK);
+        _agentCommit(dinner, alice, AGENT_PK, AnzenTreasury.TooManyActive.selector);
+        (, uint8 active) = t.passRules(alice.id);
+        assertEq(active, 1);
+        _release(spin, alice, OK); // the owner (never the agent) frees the slot
+        _agentCommit(dinner, alice, AGENT_PK, OK);
+
+        _grant(bob, vm.addr(AGENT_PK), 100e6, AnzenTreasury.PassRules(0, 10_000, 0, 1));
+        _agentCommit(spin, bob, AGENT_PK, AnzenTreasury.TooFarAhead.selector); // check-in is 2 days out
     }
 
     function test_commitAfterDeadline_rejected() public {
@@ -452,7 +630,7 @@ contract AnzenTreasuryTest is Test {
         _delegate(alice, agent, 25e6, uint64(_now() + 7 days));
         _agentCommit(id, alice, AGENT_PK, OK);
         assertEq(t.balanceOf(alice.id), 90e6); // alice's funds, alice's participation
-        (, , uint128 spent, , ) = t.delegationOf(alice.id);
+        (, , uint128 spent, , , , ) = t.delegationOf(alice.id);
         assertEq(spent, AMOUNT);
         assertEq(uint8(t.participation(id, alice.id).status), uint8(AnzenTreasury.Status.Committed));
 

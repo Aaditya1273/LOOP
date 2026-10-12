@@ -30,6 +30,38 @@ object Messages {
         uint(t.commitDeadline), uint(t.checkInStart), uint(t.checkInEnd), uint(t.noShow.toLong()),
     )
 
+    /** create/v1 plus published terms: category (0 other … 5 learning) and late-release fee in basis points. */
+    fun createV2(chainId: Long, treasury: String, nonce: Long, deadline: Long, t: EventTerms, category: Int, lateFeeBps: Int): ByteArray = words(
+        tag("ANZEN/create/v2"), uint(chainId), address(treasury), uint(nonce), uint(deadline),
+        t.organizer, t.policyHash, address(t.issuer), uint(t.amount), uint(t.capacity.toLong()),
+        uint(t.commitDeadline), uint(t.checkInStart), uint(t.checkInEnd), uint(t.noShow.toLong()),
+        uint(category.toLong()), uint(lateFeeBps.toLong()),
+    )
+
+    /** Agent Pass rules. Zero = no limit, except maxLateFeeBps (0 = free release only, 10_000 = any fee). */
+    data class PassRules(val categories: Long = 0, val maxLateFeeBps: Int = 10_000, val maxActive: Int = 0, val maxLeadDays: Int = 0)
+
+    fun grantPass(chainId: Long, treasury: String, agent: String, agentId: BigInteger, cap: Long, expiry: Long, r: PassRules,
+                  nonce: Long, deadline: Long) = words(
+        tag("ANZEN/pass/v1"), uint(chainId), address(treasury), address(agent), uint(agentId), uint(cap), uint(expiry),
+        uint(r.categories), uint(r.maxLateFeeBps.toLong()), uint(r.maxActive.toLong()), uint(r.maxLeadDays.toLong()),
+        uint(nonce), uint(deadline),
+    )
+
+    fun release(chainId: Long, treasury: String, eventId: Long, nonce: Long, deadline: Long) = words(
+        tag("ANZEN/release/v1"), uint(chainId), address(treasury), uint(eventId), uint(nonce), uint(deadline),
+    )
+
+    /** The guest's staff-scanned check-in code (silver tier). Valid 45 s from [issuedAt]. */
+    fun present(chainId: Long, treasury: String, eventId: Long, issuedAt: Long) = words(
+        tag("ANZEN/present/v1"), uint(chainId), address(treasury), uint(eventId), uint(issuedAt),
+    )
+
+    /** The organizer's countersignature on one guest's code. */
+    fun staff(chainId: Long, treasury: String, eventId: Long, guestKeyId: ByteArray, issuedAt: Long) = words(
+        tag("ANZEN/staff/v1"), uint(chainId), address(treasury), uint(eventId), guestKeyId, uint(issuedAt),
+    )
+
     fun commit(chainId: Long, treasury: String, eventId: Long, amount: Long, nonce: Long, deadline: Long) = words(
         tag("ANZEN/commit/v1"), uint(chainId), address(treasury), uint(eventId), uint(amount), uint(nonce), uint(deadline),
     )
@@ -70,10 +102,11 @@ object Messages {
         return leftPad(v.toByteArray().dropWhile { it == 0.toByte() }.toByteArray())
     }
 
+    /** An EVM address (20 bytes), or a Solana key (32 bytes) whose first 20 bytes fill the address slot. */
     internal fun address(hex: String): ByteArray {
         val b = hex.hexToBytes()
-        require(b.size == 20) { "address must be 20 bytes" }
-        return leftPad(b)
+        require(b.size == 20 || b.size == 32) { "address must be 20 or 32 bytes" }
+        return leftPad(b.copyOf(20))
     }
 
     private fun leftPad(b: ByteArray) = ByteArray(32 - b.size) + b

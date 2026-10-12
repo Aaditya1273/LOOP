@@ -13,9 +13,13 @@ const fromB64url = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g
 
 const word = (b) => { if (b.length > 32) throw new Error("word overflow"); const w = new Uint8Array(32); w.set(b, 32 - b.length); return w; };
 export const uint = (v) => { let n = BigInt(v); if (n < 0n) throw new Error("uint < 0"); const o = []; while (n > 0n) { o.unshift(Number(n & 255n)); n >>= 8n; } return word(Uint8Array.from(o)); };
-const address = (a) => { const b = unhex(a); if (b.length !== 20) throw new Error("bad address"); return word(b); };
+// An `address` slot holds an EVM address, or the first 20 bytes of a 32-byte Solana key (same preimages on both chains).
+const address = (a) => { const b = unhex(a); if (b.length !== 20 && b.length !== 32) throw new Error("bad address"); return word(b.slice(0, 20)); };
 const b32 = (h) => { const b = typeof h === "string" ? unhex(h) : h; if (b.length !== 32) throw new Error("bad bytes32"); return b; };
 const tag = (s) => { const w = new Uint8Array(32); w.set(enc.encode(s)); return w; };
+
+const config = (t) => concat(b32(t.organizer), b32(t.policyHash), address(t.issuer), uint(t.amount), uint(t.capacity),
+  uint(t.commitDeadline), uint(t.checkInStart), uint(t.checkInEnd), uint(t.noShow));
 
 export const Messages = {
   commit: (chainId, treasury, eventId, amount, nonce, deadline) =>
@@ -29,8 +33,19 @@ export const Messages = {
   delegate: (chainId, treasury, agent, agentId, cap, expiry, nonce, deadline) =>
     concat(tag("ANZEN/delegate/v1"), uint(chainId), address(treasury), address(agent), uint(agentId), uint(cap), uint(expiry), uint(nonce), uint(deadline)),
   create: (chainId, treasury, nonce, deadline, t) =>
-    concat(tag("ANZEN/create/v1"), uint(chainId), address(treasury), uint(nonce), uint(deadline), b32(t.organizer), b32(t.policyHash),
-      address(t.issuer), uint(t.amount), uint(t.capacity), uint(t.commitDeadline), uint(t.checkInStart), uint(t.checkInEnd), uint(t.noShow)),
+    concat(tag("ANZEN/create/v1"), uint(chainId), address(treasury), uint(nonce), uint(deadline), config(t)),
+  // v4
+  createV2: (chainId, treasury, nonce, deadline, t, category, lateFeeBps) =>
+    concat(tag("ANZEN/create/v2"), uint(chainId), address(treasury), uint(nonce), uint(deadline), config(t), uint(category), uint(lateFeeBps)),
+  grantPass: (chainId, treasury, agent, agentId, cap, expiry, r, nonce, deadline) =>
+    concat(tag("ANZEN/pass/v1"), uint(chainId), address(treasury), address(agent), uint(agentId), uint(cap), uint(expiry),
+      uint(r.categories), uint(r.maxLateFeeBps), uint(r.maxActive), uint(r.maxLeadDays), uint(nonce), uint(deadline)),
+  release: (chainId, treasury, eventId, nonce, deadline) =>
+    concat(tag("ANZEN/release/v1"), uint(chainId), address(treasury), uint(eventId), uint(nonce), uint(deadline)),
+  present: (chainId, treasury, eventId, issuedAt) =>
+    concat(tag("ANZEN/present/v1"), uint(chainId), address(treasury), uint(eventId), uint(issuedAt)),
+  staff: (chainId, treasury, eventId, guestKeyId, issuedAt) =>
+    concat(tag("ANZEN/staff/v1"), uint(chainId), address(treasury), uint(eventId), b32(guestKeyId), uint(issuedAt)),
 };
 export const NO_AGENT_ID = (1n << 256n) - 1n;
 

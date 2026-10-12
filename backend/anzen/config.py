@@ -11,6 +11,8 @@ DEPLOYMENTS = BACKEND_DIR.parent / "contracts" / "deployments"
 NETWORKS = {
     31337: ("Local devnet", None),
     10143: ("Monad testnet", "https://testnet.monadexplorer.com/tx/"),
+    103: ("Solana devnet", "https://explorer.solana.com/tx/{tx}?cluster=devnet"),
+    104: ("Solana localnet", None),
 }
 MAINNETS = {1, 143}  # Ethereum, Monad mainnet: the dev faucet is refused there
 
@@ -26,16 +28,20 @@ class Settings:
     db_path: str
     faucet_amount: int  # base units (6 decimals)
     public_rpc: str  # handed to agents so they can register their ERC-8004 identity; must not embed an API key
+    program_id: str | None = None  # Solana: the anzen_core program (treasury/token then hold its 20-byte domain and mint)
 
     @classmethod
     def from_env(cls) -> "Settings":
         chain_id = int(_required("ANZEN_CHAIN_ID"))
-        deployment = json.loads((DEPLOYMENTS / f"{chain_id}.json").read_text())
+        # Solana deployments live next to the Monad ones: deployments/solana-<chain id>.json (103 = devnet).
+        sol = DEPLOYMENTS / f"solana-{chain_id}.json"
+        deployment = json.loads((sol if sol.exists() else DEPLOYMENTS / f"{chain_id}.json").read_text())
         return cls(
             rpc_url=_required("ANZEN_RPC_URL"),
             chain_id=chain_id,
-            treasury=deployment["treasury"],
-            token=deployment["token"],
+            treasury=deployment.get("treasury", ""),
+            token=deployment.get("mint") or deployment["token"],
+            program_id=deployment.get("programId"),
             relayer_key=_required("ANZEN_RELAYER_KEY"),
             issuer_key=_required("ANZEN_ISSUER_KEY"),
             # Postgres (e.g. Neon) for hosting where the disk doesn't persist; SQLite file otherwise.

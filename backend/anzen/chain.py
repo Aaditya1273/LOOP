@@ -60,12 +60,26 @@ class Chain:
         c, s = self._rpc(lambda: self.treasury.functions.getEvent(event_id).call())
         cfg = dict(zip(["organizer", "policy_hash", "issuer", "amount", "capacity", "commit_deadline",
                         "check_in_start", "check_in_end", "no_show"], c))
-        state = dict(zip(["committed", "attended", "cancelled", "finalized", "attendee_payout"], s))
+        state = dict(zip(["committed", "attended", "cancelled", "finalized", "attendee_payout", "waitlisted",
+                          "refilled", "released", "recovered"], s))
+        cfg["category"], cfg["late_fee_bps"] = self._rpc(lambda: self.treasury.functions.termsOf(event_id).call())
         return cfg, state
 
     def participation(self, event_id: int, key_id: bytes) -> dict:
         p = self._rpc(lambda: self.treasury.functions.participation(event_id, key_id).call())
-        return dict(zip(["status", "attended", "checked_in_at", "settled_amount", "passport_id", "agent_ref"], p))
+        return dict(zip(["status", "attended", "checked_in_at", "settled_amount", "passport_id", "agent_ref", "tier",
+                         "by_agent"], p))
+
+    def record(self, key_id: bytes) -> dict:
+        r = self._rpc(lambda: self.treasury.functions.recordOf(key_id).call())
+        return dict(zip(["attended", "missed", "releasedInTime", "streak", "bestStreak", "shields"], r))
+
+    def score(self, key_id: bytes) -> int:
+        return self._rpc(lambda: self.treasury.functions.showUpScore(key_id).call())
+
+    def pass_rules(self, key_id: bytes) -> tuple[dict, int]:
+        rules, active = self._rpc(lambda: self.treasury.functions.passRules(key_id).call())
+        return dict(zip(["categories", "maxLateFeeBps", "maxActive", "maxLeadDays"], rules)), active
 
     def balance(self, key_id: bytes) -> int:
         return self._rpc(lambda: self.treasury.functions.balanceOf(key_id).call())
@@ -86,6 +100,8 @@ class Chain:
             zero = "0x0000000000000000000000000000000000000000"
             self._registries = (None if ident == zero else ident, None if rep == zero else rep)
         return self._registries
+
+    vm = "evm"
 
     def show_up(self, agent_id: int) -> dict:
         """Show-up reputation as reported by THIS treasury only (the Sybil-proof client), from the ERC-8004
@@ -119,7 +135,9 @@ class Chain:
 
     # ---------- writes
 
-    def sign_challenge(self, digest: bytes) -> bytes:
+    def sign_challenge(self, event_id: int, challenge: bytes, expires_at: int) -> bytes:
+        from . import messages
+        digest = messages.challenge_hash(self.chain_id, self.treasury.address, event_id, challenge, expires_at)
         return Account.sign_message(encode_defunct(primitive=digest), self.issuer.key).signature
 
     def send(self, call) -> str:

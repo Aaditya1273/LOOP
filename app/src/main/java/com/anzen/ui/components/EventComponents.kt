@@ -96,6 +96,8 @@ fun eventStatus(e: Event): Pair<String, Tone> = when (nextAction(e)) {
     NextAction.Missed -> "Missed" to Tone.Failed
     NextAction.Settle -> "Ready to settle" to Tone.Pending
     NextAction.ViewResult -> "Settled" to Tone.Verified
+    NextAction.Waitlisted -> "Waitlisted" to Tone.Pending
+    NextAction.Released -> "Place given back" to Tone.Neutral
 }
 
 @Composable
@@ -175,7 +177,7 @@ fun TxProgress(state: TxState, verifiedText: String) {
                 TxState.Submitting -> Step("Submitting", "Sending your signed action to the network.", Tone.Pending, spinner = true)
                 is TxState.Pending -> Step("Pending", "Submitted. Waiting for the network to include it.", Tone.Pending, spinner = true, tx = s.tx)
                 is TxState.Confirmed -> Step("Confirmed onchain", "Reading the treasury to verify the result.", Tone.Pending, spinner = true, tx = s.tx)
-                is TxState.Verified -> Step(verifiedText, "Verified against the treasury contract.", Tone.Verified, tx = s.tx)
+                is TxState.Verified -> Step(verifiedText, "Verified against ANZEN's onchain state.", Tone.Verified, tx = s.tx)
                 is TxState.StillPending -> Step("Still pending", "It hasn't been confirmed yet. It may still go through; check Activity before trying again.", Tone.Pending, tx = s.tx)
                 is TxState.Failed -> Step("Not completed", ErrorCopy.of(s.reason), Tone.Failed, tx = s.tx)
                 TxState.Cancelled -> Step("Cancelled", "You cancelled the authorization. Nothing was signed or sent.", Tone.Neutral)
